@@ -1,0 +1,8 @@
+node_modules/
+.DS_Store
+.trajecta/
+coverage/
+*.log
+*.sqlite*
+.env*
+!.env.example

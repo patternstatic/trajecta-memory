@@ -1,0 +1,43 @@
+{
+  "name": "trajecta-memory",
+  "version": "0.1.0",
+  "description": "Cue-first work continuity and transfer between cloud chatbots and local agents.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "bin": {
+    "trajecta": "./src/cli.ts"
+  },
+  "files": [
+    "src",
+    "assets",
+    "docs",
+    "examples",
+    "README.md",
+    "SECURITY.md",
+    "CONTRIBUTING.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "scripts": {
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "demo": "node --experimental-strip-types examples/cloud-local-relay.ts",
+    "check": "npm test && npm run demo"
+  },
+  "engines": {
+    "node": ">=22.19"
+  },
+  "keywords": [
+    "agent-memory",
+    "context-engineering",
+    "handoff",
+    "multi-agent",
+    "work-continuity"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tamvi-journal/trajecta-memory.git"
+  }
+}

@@ -1,0 +1,30 @@
+<svg width="1440" height="600" viewBox="0 0 1440 600" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1440" y2="600" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B1020"/><stop offset="1" stop-color="#111B31"/>
+    </linearGradient>
+    <linearGradient id="line" x1="150" y1="305" x2="1280" y2="305" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FF6B5E"/><stop offset=".48" stop-color="#F4EFE6"/><stop offset="1" stop-color="#4FD1C5"/>
+    </linearGradient>
+    <filter id="glow"><feGaussianBlur stdDeviation="7" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <rect width="1440" height="600" rx="28" fill="url(#bg)"/>
+  <g opacity=".13" stroke="#F4EFE6"><path d="M0 100H1440"/><path d="M0 200H1440"/><path d="M0 300H1440"/><path d="M0 400H1440"/><path d="M0 500H1440"/><path d="M240 0V600"/><path d="M480 0V600"/><path d="M720 0V600"/><path d="M960 0V600"/><path d="M1200 0V600"/></g>
+  <text x="86" y="92" fill="#F4EFE6" font-family="ui-monospace, monospace" font-size="18" letter-spacing="4">WORK TRAJECTORY / 001</text>
+  <text x="86" y="137" fill="#F4EFE6" font-family="system-ui, sans-serif" font-weight="700" font-size="42">Cloud thinks. Local builds.</text>
+  <text x="86" y="177" fill="#91A0B9" font-family="system-ui, sans-serif" font-size="22">The work keeps moving without starting over.</text>
+  <path d="M146 350C244 350 271 281 362 281H501C568 281 598 231 598 176" stroke="#4FD1C5" stroke-width="3" stroke-dasharray="8 10" opacity=".65"/>
+  <path d="M146 350C264 350 279 415 395 415H492" stroke="#FF6B5E" stroke-width="3" stroke-dasharray="8 10" opacity=".75"/>
+  <path d="M146 350C305 350 330 320 483 320H657C742 320 762 373 848 373H1015C1109 373 1131 315 1280 315" stroke="url(#line)" stroke-width="8" stroke-linecap="round" filter="url(#glow)"/>
+  <path d="M598 176C598 251 650 320 720 320" stroke="#4FD1C5" stroke-width="3" stroke-dasharray="8 10" opacity=".65"/>
+  <path d="M492 415C561 415 596 320 672 320" stroke="#FF6B5E" stroke-width="3" stroke-dasharray="8 10" opacity=".75"/>
+  <g font-family="ui-monospace, monospace" font-size="16">
+    <circle cx="146" cy="350" r="14" fill="#FF6B5E"/><text x="112" y="391" fill="#F4EFE6">ROOT</text>
+    <circle cx="483" cy="320" r="10" fill="#D6A85F"/><text x="428" y="295" fill="#D6A85F">ANCHOR</text>
+    <circle cx="598" cy="176" r="9" fill="#4FD1C5"/><text x="529" y="150" fill="#4FD1C5">CLOUD PLAN</text>
+    <circle cx="492" cy="415" r="9" fill="#FF6B5E"/><text x="429" y="455" fill="#FF8A7E">PARKED</text>
+    <circle cx="848" cy="373" r="10" fill="#F4EFE6"/><text x="786" y="417" fill="#F4EFE6">LOCAL BUILD</text>
+    <circle cx="1280" cy="315" r="17" fill="#4FD1C5" filter="url(#glow)"/><text x="1197" y="285" fill="#4FD1C5">NEXT ACTION</text>
+  </g>
+  <g transform="translate(1040 76)"><rect width="306" height="108" rx="18" fill="#151F35" stroke="#293653"/><text x="24" y="34" fill="#91A0B9" font-family="ui-monospace, monospace" font-size="14">TRANSFER PACKET</text><text x="24" y="66" fill="#F4EFE6" font-family="system-ui, sans-serif" font-size="18">cue-selected · bounded</text><text x="24" y="91" fill="#4FD1C5" font-family="system-ui, sans-serif" font-size="18">cloud ⇄ local</text></g>
+</svg>
