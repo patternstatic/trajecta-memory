@@ -62,6 +62,16 @@ npm test
 npm run demo
 ```
 
+## Product page
+
+Preview the static product page locally:
+
+```bash
+python3 -m http.server 4173
+```
+
+Then open [http://localhost:4173/](http://localhost:4173/). The interactive handoff is an explanatory simulation of tested alpha behavior; adapters remain in validation.
+
 ```ts
 import { TrajectaRelay, TrajectaStore } from "trajecta-memory";
 
