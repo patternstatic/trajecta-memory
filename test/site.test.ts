@@ -23,6 +23,16 @@ test("verified packet resumes the exact branch", () => {
 
 test("replay returns every state to ready", () => assert.equal(reduceDemo("resumed", "REPLAY"), "ready"));
 
+test("every demo view exposes the handoff receipt contract", () => {
+  for (const state of ["ready", "rejected", "verified", "resumed"]) {
+    const view = describeDemo(state);
+    for (const field of ["branch", "provenance", "evidence", "openLoops", "nextAction", "verification", "selectedPacket", "tone"]) assert.ok(view[field], `${state} missing ${field}`);
+  }
+  assert.equal(describeDemo("ready").selectedPacket, "stale");
+  assert.equal(describeDemo("verified").selectedPacket, "current");
+  assert.equal(describeDemo("resumed").currentRevision, "15");
+});
+
 test("landing page exposes honest conversion and demo hooks", () => {
   const html = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
   assert.match(html, /Run the 90-second handoff demo/);
@@ -31,6 +41,13 @@ test("landing page exposes honest conversion and demo hooks", () => {
   assert.match(html, /data-action="TRY_STALE"/);
   assert.match(html, /data-action="USE_VERIFIED"/);
   assert.match(html, /data-action="RESUME"/);
+  assert.match(html, /data-packet="stale"[^>]*aria-current="true"/);
+  assert.match(html, /data-packet="current"[^>]*aria-current="false"/);
+  assert.match(html, /data-field="provenance"/);
+  assert.match(html, /data-field="evidence"/);
+  assert.match(html, /data-field="openLoops"/);
+  assert.match(html, /data-state="ready"/);
+  assert.match(html, /aria-live="polite"/);
   assert.doesNotMatch(html, /connects live (ChatGPT|Claude|Codex|Cursor)/i);
 });
 

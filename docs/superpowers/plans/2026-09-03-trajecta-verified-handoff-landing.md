@@ -62,7 +62,7 @@ test("replay returns every state to ready", () => {
 
 - [ ] **Step 2: Run the focused test and confirm the missing-module failure**
 
-Run: `node --experimental-strip-types --test test/site.test.ts`  
+Run: `node --experimental-strip-types --test test/site.test.ts`
 Expected: FAIL because `demo.js` does not exist.
 
 - [ ] **Step 3: Implement the pure state machine**
@@ -86,7 +86,7 @@ Define immutable view data for all four states, using revisions 12, 14, and 15 a
 
 - [ ] **Step 4: Run the focused tests**
 
-Run: `node --experimental-strip-types --test test/site.test.ts`  
+Run: `node --experimental-strip-types --test test/site.test.ts`
 Expected: PASS with three tests.
 
 - [ ] **Step 5: Commit the state machine**
@@ -125,7 +125,7 @@ test("landing page exposes honest conversion and demo hooks", () => {
 
 - [ ] **Step 2: Run the focused test and confirm the missing-page failure**
 
-Run: `node --experimental-strip-types --test test/site.test.ts`  
+Run: `node --experimental-strip-types --test test/site.test.ts`
 Expected: FAIL because `index.html` does not exist.
 
 - [ ] **Step 3: Build the semantic document**
@@ -144,7 +144,7 @@ the current message to an `aria-live="polite"` region.
 
 - [ ] **Step 5: Run the focused tests**
 
-Run: `node --experimental-strip-types --test test/site.test.ts`  
+Run: `node --experimental-strip-types --test test/site.test.ts`
 Expected: PASS.
 
 - [ ] **Step 6: Commit the semantic page**
@@ -179,7 +179,7 @@ test("stylesheet preserves brand, accessibility, and mobile behavior", () => {
 
 - [ ] **Step 2: Run the focused test and confirm the missing-stylesheet failure**
 
-Run: `node --experimental-strip-types --test test/site.test.ts`  
+Run: `node --experimental-strip-types --test test/site.test.ts`
 Expected: FAIL because `styles.css` does not exist.
 
 - [ ] **Step 3: Implement tokens and layout**
@@ -198,7 +198,7 @@ inside `@media (prefers-reduced-motion: reduce)`.
 
 - [ ] **Step 5: Run the focused tests**
 
-Run: `node --experimental-strip-types --test test/site.test.ts`  
+Run: `node --experimental-strip-types --test test/site.test.ts`
 Expected: PASS.
 
 - [ ] **Step 6: Commit the visual system**
@@ -235,12 +235,12 @@ and `http://localhost:4173/`, while retaining the existing quick start.
 
 - [ ] **Step 3: Run all repository verification**
 
-Run: `npm run check`  
+Run: `npm run check`
 Expected: all Node tests pass and the cloud/local relay demo finishes.
 
 - [ ] **Step 4: Run whitespace verification**
 
-Run: `git diff --check`  
+Run: `git diff --check`
 Expected: no output.
 
 - [ ] **Step 5: Inspect the desktop and mobile page**
@@ -255,4 +255,3 @@ mark, visible keyboard focus, truthful alpha labels, and readable receipt data.
 git add README.md test/site.test.ts
 git commit -m "docs: document the Trajecta product page"
 ```
-

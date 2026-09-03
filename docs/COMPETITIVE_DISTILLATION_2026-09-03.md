@@ -1,7 +1,7 @@
 # Competitive Distillation: Trajecta Product Page
 
-**Observed:** 2026-09-03  
-**Scope:** Public product pages, official documentation, and public repositories  
+**Observed:** 2026-09-03
+**Scope:** Public product pages, official documentation, and public repositories
 **Decision status:** Research input for page design; not an implementation or pricing commitment
 
 ## Executive decision
@@ -304,4 +304,3 @@ scope expansion before evidence supports them.
 - [Agent Handoff public repository](https://github.com/AniruddhaHumane/handoff).
 - [ChatGPT Projects official help](https://help.openai.com/en/articles/10169521-using-projects-in-chatgpt).
 - [Claude Code session management official documentation](https://code.claude.com/docs/en/sessions).
-

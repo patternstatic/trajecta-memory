@@ -1,6 +1,6 @@
 # Trajecta Verified-Handoff Landing Page Specification
 
-**Status:** Approved direction, implementation pending visual draft review  
+**Status:** Approved direction, implementation pending visual draft review
 **Research:** [`COMPETITIVE_DISTILLATION_2026-09-03.md`](../../COMPETITIVE_DISTILLATION_2026-09-03.md)
 
 ## Goal
@@ -109,4 +109,3 @@ receipt fields, button availability, and an `aria-live` announcement.
 - `npm run check` passes.
 - The new site behavior tests pass.
 - HTML has no dead local links or missing referenced assets.
-
