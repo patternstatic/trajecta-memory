@@ -24,7 +24,7 @@ if (typeof document !== "undefined") {
     const render = () => {
       const view = describeDemo(state);
       root.dataset.state = state;
-      root.querySelector(".trajectory")?.setAttribute("data-state", state);
+      root.closest(".hero-demo")?.querySelector(".trajectory")?.setAttribute("data-state", state);
       for (const packet of root.querySelectorAll("[data-packet]")) {
         const current = packet.dataset.packet === view.selectedPacket;
         packet.classList.toggle("selected", current);

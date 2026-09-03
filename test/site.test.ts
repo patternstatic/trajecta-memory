@@ -35,6 +35,7 @@ test("every demo view exposes the handoff receipt contract", () => {
 
 test("landing page exposes honest conversion and demo hooks", () => {
   const html = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const demo = fs.readFileSync(new URL("../demo.js", import.meta.url), "utf8");
   assert.match(html, /Run the 90-second handoff demo/);
   assert.match(html, /Adapters in validation/i);
   assert.match(html, /data-demo-root/);
@@ -48,6 +49,8 @@ test("landing page exposes honest conversion and demo hooks", () => {
   assert.match(html, /data-field="openLoops"/);
   assert.match(html, /data-state="ready"/);
   assert.match(html, /aria-live="polite"/);
+  assert.match(html, /class="hero-demo"[^>]*id="demo"[\s\S]*class="trajectory"[^>]*data-state="ready"/);
+  assert.match(demo, /root\.closest\("\.hero-demo"\)\?\.querySelector\("\.trajectory"\)/);
   assert.doesNotMatch(html, /connects live (ChatGPT|Claude|Codex|Cursor)/i);
 });
 
