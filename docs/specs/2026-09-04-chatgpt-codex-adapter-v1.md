@@ -1,10 +1,17 @@
 # Trajecta ChatGPT → Codex Adapter v1
 
-**Status:** implementation-ready contract  
-**Date:** 2026-09-04  
-**Owner:** Trajecta product-validation branch  
-**Target:** one real, auditable cloud-planning → local-Codex handoff  
+**Status:** superseded historical contract; do not implement<br>
+**Date:** 2026-09-04<br>
+**Owner:** Trajecta product-validation branch<br>
+**Target:** one real, auditable cloud-planning → local-Codex handoff<br>
 **Return point:** review after five completed handoffs or the first repeated use
+
+This document is retained as design history. Ty approved
+`docs/superpowers/specs/2026-09-04-trajecta-private-beta-delivery.md` on
+2026-09-05. The approved v0.1 product is a local-workspace SDK and must not
+claim a native Codex session capability or turnkey ChatGPT-to-Codex delivery.
+Any future client-specific adapter requires separately observed host-issued
+capability evidence.
 
 ## 1. Decision
 
