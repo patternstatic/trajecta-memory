@@ -10,6 +10,15 @@ import { MAX_ENVELOPE_BYTES, parseStrictJsonBytes } from "./strict-json.ts";
 const OPAQUE_ID = /^[a-z]+:[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 
+function compareCodeUnits(left: string, right: string): number {
+  const length = Math.min(left.length, right.length);
+  for (let index = 0; index < length; index++) {
+    const difference = left.charCodeAt(index) - right.charCodeAt(index);
+    if (difference !== 0) return difference;
+  }
+  return left.length - right.length;
+}
+
 function unsupported(message: string): never {
   throw betaError("UNSUPPORTED_SCHEMA", message);
 }
@@ -81,6 +90,28 @@ function assertPacket(packet: unknown): asserts packet is TransferPacket {
   if (packet.activeBranch === null) throw betaError("BRANCH_MISMATCH", "Local resume envelopes require an active branch.");
 }
 
+function sortedUnique(values: readonly string[]): string[] {
+  return [...new Set(values)].sort(compareCodeUnits);
+}
+
+function assertReceiptReferences(values: readonly string[], label: string) {
+  if (values.length > 20) unsupported(`${label} must contain at most 20 unique values.`);
+  values.forEach((value, index) => opaqueId(value, `${label} ${index + 1}`));
+}
+
+export function deriveLocalResumeReceiptReferences(packet: Pick<TransferPacket, "recentDeltas">): {
+  provenance: string[];
+  evidence: string[];
+} {
+  const references = {
+    provenance: sortedUnique(packet.recentDeltas.flatMap((delta) => delta.provenance)),
+    evidence: sortedUnique(packet.recentDeltas.map((delta) => delta.id)),
+  };
+  assertReceiptReferences(references.provenance, "Receipt provenance");
+  assertReceiptReferences(references.evidence, "Receipt evidence");
+  return references;
+}
+
 export function envelopePayload(envelope: LocalResumeEnvelopeV1): Omit<LocalResumeEnvelopeV1, "integrity"> {
   const { integrity: _integrity, ...payload } = envelope;
   return payload;
@@ -117,6 +148,7 @@ export function assertLocalResumeEnvelope(envelope: unknown): asserts envelope i
   const actual = Buffer.from(integrity.canonicalPayloadDigest, "utf8");
   if (!timingSafeEqual(actual, expected)) throw betaError("INTEGRITY_MISMATCH", "Envelope canonical payload digest does not match the captured payload.");
   assertPacket(candidate.packet);
+  deriveLocalResumeReceiptReferences(candidate.packet);
 }
 
 export function assertEnvelopeFresh(envelope: LocalResumeEnvelopeV1, now: Date): void {

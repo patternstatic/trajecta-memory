@@ -9,6 +9,7 @@ import {
   attemptDigest,
   buildLocalResumeEnvelope,
   captureLocalResumeEnvelopeFile,
+  deriveLocalResumeReceiptReferences,
   readLocalResumeEnvelopeBytes,
 } from "../src/index.ts";
 import { assertTransferPacket } from "../../../src/index.ts";
@@ -100,6 +101,40 @@ test("envelope validation rejects packet evidence bounds and a packet over 6000 
   finalizePacketBudget(overBudget.packet);
   assert.throws(
     () => assertLocalResumeEnvelope(buildLocalResumeEnvelope(overBudget)),
+    errorCode("UNSUPPORTED_SCHEMA"),
+  );
+});
+
+test("envelope validation rejects aggregate receipt provenance above twenty unique IDs", () => {
+  const input = validEnvelopeInput();
+  const first = structuredClone(input.packet.recentDeltas[0]!);
+  first.id = "delta:aggregate-one";
+  first.provenance = Array.from({ length: 11 }, (_, index) => `artifact:aggregate-${index}`);
+  const second = structuredClone(first);
+  second.id = "delta:aggregate-two";
+  second.provenance = Array.from({ length: 11 }, (_, index) => `artifact:aggregate-${index + 11}`);
+  input.packet.recentDeltas = [first, second];
+  finalizePacketBudget(input.packet);
+
+  assert.throws(
+    () => deriveLocalResumeReceiptReferences(input.packet),
+    errorCode("UNSUPPORTED_SCHEMA"),
+  );
+  assert.throws(
+    () => assertLocalResumeEnvelope(buildLocalResumeEnvelope(input)),
+    errorCode("UNSUPPORTED_SCHEMA"),
+  );
+});
+
+test("receipt-reference derivation rejects aggregate evidence above twenty unique IDs", () => {
+  const packet = validEnvelopeInput().packet;
+  const delta = structuredClone(packet.recentDeltas[0]!);
+  packet.recentDeltas = Array.from({ length: 21 }, (_, index) => ({
+    ...structuredClone(delta),
+    id: `delta:evidence-${index}`,
+  }));
+  assert.throws(
+    () => deriveLocalResumeReceiptReferences(packet),
     errorCode("UNSUPPORTED_SCHEMA"),
   );
 });
