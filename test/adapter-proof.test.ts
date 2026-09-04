@@ -12,6 +12,7 @@ import {
   ResumeAttemptLedger,
   stableSerialize,
   TrajectaStore,
+  renderResumeReceipt,
 } from "../src/index.ts";
 import type { ResumeAttemptInputV1, ResumeAttemptReceiptV1, Surface } from "../src/index.ts";
 
@@ -258,4 +259,24 @@ test("P07-P09 current resume commits once and operation replay is exact", () => 
     }), OperationConflict);
     assert.equal(f.store.getWork(f.opened.work.id).revision, accepted.observedRevisionAfter);
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test("P10 receipt renderer projects the authoritative JSON fields", () => {
+  const output = renderResumeReceipt(receipt({ outcome: "accepted", code: "RESUMED", observedRevisionAfter: 4 }));
+  assert.match(output, /ACCEPTED\s+RESUMED/);
+  assert.match(output, /expected\s+2/);
+  assert.match(output, /observed\s+3 → 4/);
+  assert.match(output, /work:proof/);
+  assert.match(output, /branch:proof/);
+  assert.match(output, /artifact:proof-contract-v1/);
+});
+
+test("P11 comparator fixture is bounded and contains no credential or account identifier", () => {
+  const file = new URL("./fixtures/comparator/memstate-customer0-2026-09-04.json", import.meta.url);
+  const raw = fs.readFileSync(file, "utf8");
+  const value = JSON.parse(raw);
+  assert.equal(value.schema, "trajecta.comparator-observation/v1");
+  assert.equal(value.candidates.length, 2);
+  assert.match(value.claim_boundary, /bounded fixture/i);
+  assert.doesNotMatch(raw, /mst_|api[_ -]?key|@|pinksilkpham|tamvi-journal/i);
 });

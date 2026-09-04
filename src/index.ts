@@ -6,3 +6,4 @@ export { assertResumeAttempt, digestResumeAttempt, stableSerialize } from "./ada
 export type { ResumeAttemptCode, ResumeAttemptInputV1, ResumeAttemptReceiptV1, ResumeTargetV1 } from "./adapters/proof/attempt-contract.ts";
 export { ResumeAttemptLedger } from "./adapters/proof/attempt-ledger.ts";
 export { attemptVerifiedResume, inspectVerifiedResume } from "./adapters/proof/attempt-resume.ts";
+export { renderResumeReceipt } from "./adapters/proof/receipt-renderer.ts";
