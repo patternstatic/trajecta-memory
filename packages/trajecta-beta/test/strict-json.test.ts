@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { createRequire, syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -76,6 +77,29 @@ test("strict reader rejects appended oversize data instead of truncating to an e
     fs.appendFileSync(file, "x".repeat(MAX_ENVELOPE_BYTES));
     assert.throws(() => parseStrictJsonFile(file), errorCode("FILE_TOO_LARGE"));
   } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("strict reader fails closed when the open file grows during read", () => {
+  const { root, file } = writeRaw('{"value":1}');
+  const require = createRequire(import.meta.url);
+  const nodeFs = require("node:fs") as typeof import("node:fs");
+  const originalReadSync = nodeFs.readSync;
+  let mutated = false;
+  nodeFs.readSync = ((...args: Parameters<typeof originalReadSync>) => {
+    if (!mutated) {
+      mutated = true;
+      fs.appendFileSync(file, " true");
+    }
+    return originalReadSync(...args);
+  }) as typeof originalReadSync;
+  syncBuiltinESMExports();
+  try {
+    assert.throws(() => parseStrictJsonFile(file), errorCode("INVALID_JSON"));
+  } finally {
+    nodeFs.readSync = originalReadSync;
+    syncBuiltinESMExports();
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
