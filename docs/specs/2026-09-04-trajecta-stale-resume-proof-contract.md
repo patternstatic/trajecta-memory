@@ -118,7 +118,7 @@ provenance artifact:proof-contract-v1
 return:    Compare the accepted receipt with the stale rejection receipt
 ```
 
-The test may normalize generated IDs into placeholders only when producing a
+The test may normalize generated IDs into stable redaction tokens only when producing a
 golden display fixture. Runtime validation always uses the real opaque IDs.
 
 ### Candidate A — stale
@@ -152,7 +152,12 @@ interface ResumeAttemptInputV1 {
     session: string;
     capability: string;
   };
-  expectedTargetCapability: string;
+  expectedTarget: {
+    surface: "local";
+    name: string;
+    session: string;
+    capability: string;
+  };
   acceptedByUser: boolean;
 }
 ```
@@ -164,7 +169,7 @@ The adapter validates, in order:
 3. operation-ledger lookup: return an equivalent resolved replay or reject
    altered operation-ID reuse;
 4. exact local target surface;
-5. byte-equal opaque session capability;
+5. byte-equal expected target descriptor, including opaque session capability;
 6. exact work ID exists;
 7. packet branch equals the work's active branch;
 8. packet expected revision equals the current revision;
@@ -191,7 +196,7 @@ interface ResumeAttemptReceiptV1 {
   attemptDigest: string;
   outcome: "rejected" | "accepted";
   code: "REVISION_CONFLICT" | "TARGET_MISMATCH" | "BRANCH_MISMATCH"
-      | "USER_ACCEPTANCE_REQUIRED" | "OPERATION_CONFLICT" | "RESUMED";
+      | "USER_ACCEPTANCE_REQUIRED" | "RESUMED";
   workId: string;
   branchId: string | null;
   packetId: string;
@@ -201,8 +206,8 @@ interface ResumeAttemptReceiptV1 {
     session: string;
   };
   expectedRevision: number;
-  observedRevisionBefore: number;
-  observedRevisionAfter: number;
+  observedRevisionBefore: number | null;
+  observedRevisionAfter: number | null;
   provenance: string[];
   evidence: string[];
   createdAt: string;
@@ -213,6 +218,8 @@ interface ResumeAttemptReceiptV1 {
 
 - `rejected` is evidence that the named invariant failed; it is not a transport
   or resume success.
+- A target/capability rejection occurs before live work lookup and records null
+  observed revisions; it must not leak current work state to an unbound target.
 - A revision rejection records the packet's expected revision and the current
   observed revision, with equal before/after revisions.
 - `accepted` requires a committed kernel resume and reports exactly one revision
@@ -234,8 +241,10 @@ Rules:
 - An unseen operation ID may begin one attempt.
 - An equivalent retry of a committed accepted attempt returns the stored
   receipt byte-for-byte and does not call the kernel again.
-- Reusing an operation ID with a different digest returns
-  `OPERATION_CONFLICT` and does not mutate kernel or ledger history.
+- Reusing an operation ID with a different digest throws the bounded
+  `OperationConflict` error and does not mutate kernel or ledger history. It
+  does not append a second receipt under the already-owned operation ID; the
+  original receipt remains the single durable authority for that operation.
 - A rejected revision attempt is durably recorded. Repeating the exact rejected
   input returns the same rejection receipt; it does not re-evaluate against a
   later state and silently change meaning.
