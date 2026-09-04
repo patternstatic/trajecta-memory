@@ -185,6 +185,24 @@ test("attempt validation rejects malformed packet bounds, IDs, revisions, and bu
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 
+test("attempt validation accepts a real bounded contract anchor packet", () => {
+  const f = proofFixture();
+  try {
+    const anchored = f.store.capture({
+      operationId: "operation:proof-contract-anchor",
+      workId: f.opened.work.id,
+      expectedRevision: f.current.work.revision,
+      surface: cloud,
+      kind: "contract_anchor",
+      summary: "Verified resume proof contract anchor",
+      provenance: ["artifact:proof-contract-v2"],
+    });
+    const packet = f.store.transfer(anchored.work.id, "resume anchored proof", "local", 6_000, true);
+    assert.ok(packet.contractAnchor);
+    assert.doesNotThrow(() => assertResumeAttempt(attempt(packet, "operation:contract-anchor-packet")));
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
 test("P01 fixture binds one exact work and active branch", () => {
   const f = proofFixture();
   try {

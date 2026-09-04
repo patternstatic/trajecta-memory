@@ -132,6 +132,16 @@ function delta(value: unknown, label: string, maxSummary = 1_000) {
   timestamp(candidate.createdAt, `${label} timestamp`);
 }
 
+function contractAnchor(value: unknown) {
+  const candidate = value as Record<string, unknown> | null;
+  if (!candidate) throw new Error("Packet contract anchor is required");
+  opaqueId(candidate.id, "Packet contract anchor ID");
+  nonNegativeInteger(candidate.contractVersion, "Packet contract anchor version");
+  bounded(candidate.summary, "Packet contract anchor summary", 8_000);
+  boundedStrings(candidate.provenance, "Packet contract anchor provenance", MAX_PROVENANCE, 240, true);
+  timestamp(candidate.createdAt, "Packet contract anchor timestamp");
+}
+
 function transferPacket(packet: unknown) {
   const candidate = packet as Record<string, unknown> | null;
   if (!candidate || candidate.schema !== "trajecta.transfer/v1") throw new Error("Unsupported transfer packet schema");
@@ -157,10 +167,7 @@ function transferPacket(packet: unknown) {
     throw new Error(`Packet deltas must contain at most ${MAX_RECENT_DELTAS} entries`);
   }
   candidate.recentDeltas.forEach((item, index) => delta(item, `Packet delta ${index + 1}`));
-  if (candidate.contractAnchor !== undefined) {
-    delta(candidate.contractAnchor, "Packet contract anchor", 8_000);
-    nonNegativeInteger((candidate.contractAnchor as Record<string, unknown>).contractVersion, "Packet contract anchor version");
-  }
+  if (candidate.contractAnchor !== undefined) contractAnchor(candidate.contractAnchor);
 
   const resume = candidate.resume as Record<string, unknown> | null;
   if (!resume) throw new Error("Packet resume is required");
