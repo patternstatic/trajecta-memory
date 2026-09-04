@@ -68,7 +68,9 @@ export function attemptVerifiedResume({ store, ledger, input, clock = () => new 
   const current = store.getWork(input.packet.work.id);
   const reject = (code: Exclude<ResumeAttemptCode, "RESUMED">) =>
     ledger.commit(makeReceipt("rejected", code, current.revision, current.revision));
-  if ((input.packet.activeBranch?.id ?? null) !== current.activeBranchId) return reject("BRANCH_MISMATCH");
+  if (!input.packet.activeBranch?.id || !current.activeBranchId || input.packet.activeBranch.id !== current.activeBranchId) {
+    return reject("BRANCH_MISMATCH");
+  }
   if (input.packet.resume.expectedRevision !== current.revision) return reject("REVISION_CONFLICT");
   if (!input.acceptedByUser) return reject("USER_ACCEPTANCE_REQUIRED");
 

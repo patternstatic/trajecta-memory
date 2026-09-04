@@ -154,6 +154,37 @@ function attempt(packet: ReturnType<TrajectaStore["transfer"]>, operationId: str
   };
 }
 
+test("attempt validation rejects an oversized provenance entry before resume", () => {
+  const f = proofFixture();
+  try {
+    const oversized = structuredClone(f.current);
+    oversized.recentDeltas[0]!.provenance = [`artifact:${"x".repeat(20_000)}`];
+    assert.throws(
+      () => assertResumeAttempt(attempt(oversized, "operation:oversized-provenance")),
+      /provenance/i,
+    );
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test("attempt validation rejects malformed packet bounds, IDs, revisions, and budget", () => {
+  const f = proofFixture();
+  try {
+    const cases: Array<{ name: string; mutate: (packet: ReturnType<TrajectaStore["transfer"]>) => void; error: RegExp }> = [
+      { name: "serialized ceiling", mutate: (packet) => { packet.budget.maxBytes = 10_000; }, error: /budget/i },
+      { name: "delta collection", mutate: (packet) => { packet.recentDeltas = Array.from({ length: 21 }, () => structuredClone(packet.recentDeltas[0]!)); }, error: /delta/i },
+      { name: "packet ID", mutate: (packet) => { packet.packetId = "packet bad"; }, error: /packet id/i },
+      { name: "work revision", mutate: (packet) => { packet.work.revision = Number.NaN; }, error: /work revision/i },
+      { name: "expected revision", mutate: (packet) => { packet.resume.expectedRevision = -1; }, error: /expected revision/i },
+      { name: "used bytes", mutate: (packet) => { packet.budget.usedBytes += 1; }, error: /used bytes/i },
+    ];
+    for (const { name, mutate, error } of cases) {
+      const packet = structuredClone(f.current);
+      mutate(packet);
+      assert.throws(() => assertResumeAttempt(attempt(packet, `operation:packet-${name.replace(" ", "-")}`)), error, name);
+    }
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
 test("P01 fixture binds one exact work and active branch", () => {
   const f = proofFixture();
   try {
@@ -216,12 +247,34 @@ test("P05-P06 target and branch mismatches fail before kernel mutation", () => {
     assert.equal(wrongTarget.observedRevisionAfter, null);
     const wrongBranchPacket = structuredClone(f.current);
     wrongBranchPacket.activeBranch!.id = "branch:other";
+    wrongBranchPacket.budget.usedBytes = Buffer.byteLength(JSON.stringify(wrongBranchPacket), "utf8");
     const wrongBranch = attemptVerifiedResume({
       store: f.store, ledger: f.ledger,
       input: attempt(wrongBranchPacket, "operation:wrong-branch"), clock: () => proofNow,
     });
     assert.equal(wrongBranch.code, "BRANCH_MISMATCH");
     assert.deepEqual(f.store.getWork(f.opened.work.id), before);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test("a branchless packet rejects as BRANCH_MISMATCH without kernel mutation", () => {
+  const f = proofFixture();
+  try {
+    const beforeWork = f.store.getWork(f.opened.work.id);
+    const beforeHistory = f.store.history(f.opened.work.id);
+    const branchless = structuredClone(f.current);
+    branchless.activeBranch = null;
+    branchless.budget.usedBytes = Buffer.byteLength(JSON.stringify(branchless), "utf8");
+    const rejected = attemptVerifiedResume({
+      store: f.store,
+      ledger: f.ledger,
+      input: attempt(branchless, "operation:branchless-packet"),
+      clock: () => proofNow,
+    });
+    assert.equal(rejected.code, "BRANCH_MISMATCH");
+    assert.equal(rejected.outcome, "rejected");
+    assert.deepEqual(f.store.getWork(f.opened.work.id), beforeWork);
+    assert.deepEqual(f.store.history(f.opened.work.id), beforeHistory);
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 
@@ -258,6 +311,24 @@ test("P07-P09 current resume commits once and operation replay is exact", () => 
       input: { ...input, acceptedByUser: false }, clock: () => proofNow,
     }), OperationConflict);
     assert.equal(f.store.getWork(f.opened.work.id).revision, accepted.observedRevisionAfter);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test("Candidate B accepted receipt preserves proof-contract-v2 and bounded evidence", () => {
+  const f = proofFixture();
+  try {
+    const accepted = attemptVerifiedResume({
+      store: f.store,
+      ledger: f.ledger,
+      input: attempt(f.current, "operation:proof-current-evidence"),
+      clock: () => proofNow,
+    });
+    assert.equal(accepted.code, "RESUMED");
+    assert.ok(accepted.provenance.includes("artifact:proof-contract-v2"));
+    assert.deepEqual(accepted.evidence, [...f.current.recentDeltas.map((delta) => delta.id)].sort());
+    assert.ok(accepted.provenance.length <= 20);
+    assert.ok(accepted.evidence.length <= 20);
+    assert.ok([...accepted.provenance, ...accepted.evidence].every((item) => item.length <= 240));
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 

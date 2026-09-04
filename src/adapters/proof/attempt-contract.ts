@@ -43,6 +43,16 @@ export interface ResumeAttemptReceiptV1 {
   createdAt: string;
 }
 
+const MAX_PROOF_PACKET_BYTES = 6_000;
+const MAX_RECENT_DELTAS = 20;
+const MAX_PROVENANCE = 20;
+const MAX_OPEN_LOOPS = 20;
+const MAX_BRANCH_CUES = 20;
+const OPAQUE_ID = /^[a-z]+:[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const WORK_STATUSES = new Set(["active", "waiting", "blocked", "complete", "abandoned"]);
+const BRANCH_STATUSES = new Set(["exploring", "parked", "merged"]);
+const DELTA_KINDS = new Set(["open", "resume", "instruction", "decision", "progress", "blocker", "correction", "next_action", "branch_open", "branch_park", "synthesis", "handoff", "outcome", "contract_anchor"]);
+
 function normalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(normalize);
   if (value && typeof value === "object") {
@@ -64,21 +74,124 @@ export function digestResumeAttempt(input: ResumeAttemptInputV1) {
   return crypto.createHash("sha256").update(stableSerialize(input)).digest("hex");
 }
 
-function bounded(value: string, label: string, max: number) {
-  if (!value?.trim() || value.length > max) throw new Error(`${label} is required and must not exceed ${max} characters`);
+function bounded(value: unknown, label: string, max: number) {
+  if (typeof value !== "string" || !value.trim() || value.length > max) {
+    throw new Error(`${label} is required and must not exceed ${max} characters`);
+  }
+}
+
+function opaqueId(value: unknown, label: string) {
+  bounded(value, label, 240);
+  if (!OPAQUE_ID.test(value)) throw new Error(`${label} must be a namespaced opaque ID`);
+}
+
+function nonNegativeInteger(value: unknown, label: string) {
+  if (!Number.isSafeInteger(value) || (value as number) < 0) {
+    throw new Error(`${label} must be a finite non-negative integer`);
+  }
+}
+
+function boundedStrings(value: unknown, label: string, maxItems: number, maxLength: number, opaque = false) {
+  if (!Array.isArray(value) || value.length > maxItems) throw new Error(`${label} must contain at most ${maxItems} entries`);
+  value.forEach((item, index) => opaque ? opaqueId(item, `${label} ${index + 1}`) : bounded(item, `${label} ${index + 1}`, maxLength));
+}
+
+function surface(value: unknown, label: string) {
+  const candidate = value as { kind?: unknown; name?: unknown; session?: unknown } | null;
+  if (!candidate || !["cloud", "local"].includes(candidate.kind as string)) throw new Error(`${label} kind must be cloud or local`);
+  bounded(candidate.name, `${label} name`, 120);
+  opaqueId(candidate.session, `${label} session`);
+}
+
+function timestamp(value: unknown, label: string) {
+  bounded(value, label, 64);
+  if (Number.isNaN(Date.parse(value as string))) throw new Error(`${label} must be an ISO timestamp`);
+}
+
+function branch(value: unknown) {
+  if (value === null) return;
+  const candidate = value as Record<string, unknown> | null;
+  if (!candidate) throw new Error("Packet active branch is required");
+  opaqueId(candidate.id, "Packet branch ID");
+  bounded(candidate.label, "Packet branch label", 120);
+  bounded(candidate.purpose, "Packet branch purpose", 500);
+  bounded(candidate.returnPoint, "Packet branch return point", 500);
+  boundedStrings(candidate.cues, "Packet branch cues", MAX_BRANCH_CUES, 500);
+  if (!BRANCH_STATUSES.has(candidate.status as string)) throw new Error("Packet branch status is invalid");
+  timestamp(candidate.updatedAt, "Packet branch timestamp");
+}
+
+function delta(value: unknown, label: string, maxSummary = 1_000) {
+  const candidate = value as Record<string, unknown> | null;
+  if (!candidate) throw new Error(`${label} is required`);
+  opaqueId(candidate.id, `${label} ID`);
+  nonNegativeInteger(candidate.revision, `${label} revision`);
+  if (!DELTA_KINDS.has(candidate.kind as string)) throw new Error(`${label} kind is invalid`);
+  bounded(candidate.summary, `${label} summary`, maxSummary);
+  boundedStrings(candidate.provenance, `${label} provenance`, MAX_PROVENANCE, 240, true);
+  timestamp(candidate.createdAt, `${label} timestamp`);
+}
+
+function transferPacket(packet: unknown) {
+  const candidate = packet as Record<string, unknown> | null;
+  if (!candidate || candidate.schema !== "trajecta.transfer/v1") throw new Error("Unsupported transfer packet schema");
+  opaqueId(candidate.packetId, "Packet ID");
+  timestamp(candidate.createdAt, "Packet timestamp");
+  bounded(candidate.cue, "Packet cue", 500);
+  surface(candidate.from, "Packet source");
+  if (!['cloud', 'local'].includes(candidate.intendedFor as string)) throw new Error("Packet intended surface is invalid");
+
+  const work = candidate.work as Record<string, unknown> | null;
+  if (!work) throw new Error("Packet work is required");
+  opaqueId(work.id, "Work ID");
+  bounded(work.topic, "Work topic", 160);
+  bounded(work.goal, "Work goal", 1_000);
+  if (work.instruction !== null) bounded(work.instruction, "Work instruction", 1_000);
+  if (!WORK_STATUSES.has(work.status as string)) throw new Error("Work status is invalid");
+  nonNegativeInteger(work.revision, "Work revision");
+  boundedStrings(work.openLoops, "Work open loops", MAX_OPEN_LOOPS, 500);
+  if (work.nextAction !== null) bounded(work.nextAction, "Work next action", 1_000);
+
+  branch(candidate.activeBranch);
+  if (!Array.isArray(candidate.recentDeltas) || candidate.recentDeltas.length > MAX_RECENT_DELTAS) {
+    throw new Error(`Packet deltas must contain at most ${MAX_RECENT_DELTAS} entries`);
+  }
+  candidate.recentDeltas.forEach((item, index) => delta(item, `Packet delta ${index + 1}`));
+  if (candidate.contractAnchor !== undefined) {
+    delta(candidate.contractAnchor, "Packet contract anchor", 8_000);
+    nonNegativeInteger((candidate.contractAnchor as Record<string, unknown>).contractVersion, "Packet contract anchor version");
+  }
+
+  const resume = candidate.resume as Record<string, unknown> | null;
+  if (!resume) throw new Error("Packet resume is required");
+  nonNegativeInteger(resume.expectedRevision, "Expected revision");
+  bounded(resume.rule, "Resume rule", 1_000);
+
+  const budget = candidate.budget as Record<string, unknown> | null;
+  if (!budget) throw new Error("Packet budget is required");
+  nonNegativeInteger(budget.maxBytes, "Packet budget max bytes");
+  nonNegativeInteger(budget.usedBytes, "Packet budget used bytes");
+  if ((budget.maxBytes as number) < 900 || (budget.maxBytes as number) > MAX_PROOF_PACKET_BYTES) {
+    throw new Error(`Packet budget must be between 900 and ${MAX_PROOF_PACKET_BYTES} bytes`);
+  }
+  if (typeof budget.truncated !== "boolean") throw new Error("Packet budget truncated must be boolean");
+  const serializedBytes = Buffer.byteLength(stableSerialize(candidate), "utf8");
+  if (serializedBytes > MAX_PROOF_PACKET_BYTES) throw new Error(`Packet exceeds ${MAX_PROOF_PACKET_BYTES}-byte proof ceiling`);
+  if (budget.usedBytes !== serializedBytes || (budget.usedBytes as number) > (budget.maxBytes as number)) {
+    throw new Error("Packet budget used bytes must match the serialized packet and remain within max bytes");
+  }
 }
 
 export function assertResumeAttempt(input: ResumeAttemptInputV1) {
   if (input?.schema !== "trajecta.resume-attempt/v1") throw new Error("Unsupported resume attempt schema");
-  if (input.packet?.schema !== "trajecta.transfer/v1") throw new Error("Unsupported transfer packet schema");
-  bounded(input.operationId, "Operation ID", 240);
-  if (!/^[a-z]+:[A-Za-z0-9][A-Za-z0-9._-]*$/.test(input.operationId)) throw new Error("Operation ID must be namespaced");
+  opaqueId(input.operationId, "Operation ID");
+  transferPacket(input.packet);
   bounded(input.target?.name, "Target name", 120);
-  bounded(input.target?.session, "Target session", 200);
-  bounded(input.target?.capability, "Target capability", 240);
+  opaqueId(input.target?.session, "Target session");
+  opaqueId(input.target?.capability, "Target capability");
   bounded(input.expectedTarget?.name, "Expected target name", 120);
-  bounded(input.expectedTarget?.session, "Expected target session", 200);
-  bounded(input.expectedTarget?.capability, "Expected target capability", 240);
+  opaqueId(input.expectedTarget?.session, "Expected target session");
+  opaqueId(input.expectedTarget?.capability, "Expected target capability");
   if (input.target.surface !== "local" || input.expectedTarget.surface !== "local") throw new Error("Proof target must be local");
   if (typeof input.acceptedByUser !== "boolean") throw new Error("acceptedByUser must be boolean");
   stableSerialize(input);
