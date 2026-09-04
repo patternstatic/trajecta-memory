@@ -105,6 +105,10 @@ export function canonicalStoreDigest(value: unknown) {
   return crypto.createHash("sha256").update(canonicalStoreJson(value)).digest("hex");
 }
 
+function legacyStoreDigest(value: unknown) {
+  return crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
 function tokenize(value: string) {
   return [...new Set(value.toLocaleLowerCase().normalize("NFKD").replace(/[^\p{L}\p{N}]+/gu, " ").trim().split(/\s+/).filter((token) => token.length > 1))];
 }
@@ -216,7 +220,7 @@ function isOperationRecordLegacy(value: unknown): value is OperationRecordLegacy
 
 function isOperationRecordV2(value: unknown): value is OperationRecordV2 {
   const record = value as Partial<OperationRecordV2> | null;
-  return Boolean(record)
+  if (!(Boolean(record)
     && record.schema === "trajecta.operation/v2"
     && typeof record.operationId === "string"
     && isDigest(record.digest)
@@ -226,9 +230,16 @@ function isOperationRecordV2(value: unknown): value is OperationRecordV2 {
     && isDelta(record.delta)
     && isStateFile(record.nextState)
     && Boolean(record.result) && isWorkItem(record.result.work) && isDelta(record.result.delta)
+  )) return false;
+  const nextWork = record.nextState.work.filter((work) => work.id === record.delta.workId);
+  return record.delta.operationId === record.operationId
+    && record.result.delta.operationId === record.operationId
+    && record.result.work.id === record.delta.workId
+    && record.result.work.revision === record.delta.revision
+    && nextWork.length === 1
     && record.nextStateDigest === canonicalStoreDigest(record.nextState)
     && canonicalStoreDigest(record.delta) === canonicalStoreDigest(record.result.delta)
-    && canonicalStoreDigest(record.result.work) === canonicalStoreDigest(record.nextState.work.find((work) => work.id === record.delta.workId));
+    && canonicalStoreDigest(record.result.work) === canonicalStoreDigest(nextWork[0]);
 }
 
 function readJsonl<T>(file: string, role: "operations" | "deltas"): T[] {
@@ -327,9 +338,12 @@ export class TrajectaStore {
     assertId(operationId, "Operation ID");
     const matching = readJsonl<OperationRecord>(this.operationFile, "operations").filter((item) => item.operationId === operationId);
     if (!matching.length) return null;
-    if (matching.some((item) => item.digest !== canonicalStoreDigest(input))) throw new OperationConflict();
-    if (matching.some((item) => !("schema" in item))) {
-      if (matching.some((item) => "schema" in item)) throw new OperationInDoubt();
+    const allLegacy = matching.every((item) => !("schema" in item));
+    const allV2 = matching.every((item) => "schema" in item);
+    if (!allLegacy && !allV2) throw new OperationInDoubt();
+    const inputDigest = allLegacy ? legacyStoreDigest(input) : canonicalStoreDigest(input);
+    if (matching.some((item) => item.digest !== inputDigest)) throw new OperationConflict();
+    if (allLegacy) {
       const committed = [...matching].reverse().find((item) => item.state === "committed");
       if (!committed?.result) throw new OperationInDoubt();
       return structuredClone(committed.result);

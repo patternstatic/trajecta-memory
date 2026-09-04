@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -113,4 +114,41 @@ test("kernel write-all completes short positive writes", () => {
     return size;
   });
   assert.deepEqual(observed, ["du", "ra", "bl", "e"]);
+});
+
+test("kernel replays an exact committed v1 operation", () => {
+  const f = fixture();
+  try {
+    const committed = f.store.resume(f.input);
+    const legacyRecord = {
+      operationId: f.input.operationId,
+      digest: crypto.createHash("sha256").update(JSON.stringify(f.input)).digest("hex"),
+      state: "committed",
+      deltaId: committed.delta.id,
+      result: committed,
+    };
+    const operationFile = path.join(f.root, "operations.jsonl");
+    const records = fs.readFileSync(operationFile, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    fs.writeFileSync(operationFile, `${records.filter((record) => record.operationId !== f.input.operationId)
+      .concat(legacyRecord).map((record) => JSON.stringify(record)).join("\n")}\n`);
+    assert.deepEqual(new TrajectaStore(f.root, now).resume(f.input), committed);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test("kernel refuses an internally inconsistent v2 reservation before writing a foreign delta", () => {
+  const f = fixture("after-reserve");
+  try {
+    assert.throws(() => f.store.resume(f.input), /fault:after-reserve/);
+    const operationFile = path.join(f.root, "operations.jsonl");
+    const records = fs.readFileSync(operationFile, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    const reservation = records.find((record) => record.operationId === f.input.operationId);
+    reservation.delta.operationId = "operation:foreign-delta";
+    reservation.result.delta.operationId = "operation:foreign-delta";
+    fs.writeFileSync(operationFile, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`);
+    assert.throws(() => new TrajectaStore(f.root, now).resume(f.input), OperationInDoubt);
+    assert.equal(fs.existsSync(path.join(f.root, "deltas.jsonl")), true);
+    assert.equal(new TrajectaStore(f.root, now).history(f.opened.work.id)
+      .filter((delta) => delta.operationId === "operation:foreign-delta").length, 0);
+    assert.equal(new TrajectaStore(f.root, now).getWork(f.opened.work.id).revision, f.opened.work.revision);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
