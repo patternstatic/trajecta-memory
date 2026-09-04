@@ -1,8 +1,8 @@
 # Trajecta Private Beta Delivery Design
 
-**Status:** proposed for Ty review  
-**Date:** 2026-09-04  
-**Owner:** Trajecta product-validation branch  
+**Status:** proposed for Ty review<br>
+**Date:** 2026-09-04<br>
+**Owner:** Trajecta product-validation branch<br>
 **Target offer:** Trajecta Verified Resume SDK Beta, USD 19 one-time<br>
 **Return point:** approve this design before implementation planning
 
