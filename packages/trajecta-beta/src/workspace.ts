@@ -32,10 +32,31 @@ function requiredGit(cwd: string, args: readonly string[]): string {
   }
 }
 
+function isMissing(error: unknown): boolean {
+  return !!error && typeof error === "object" && "code" in error && error.code === "ENOENT";
+}
+
+function assertNoSymlinkComponents(directory: string): void {
+  const resolved = path.resolve(directory);
+  const parsed = path.parse(resolved);
+  let current = parsed.root;
+  for (const component of resolved.slice(parsed.root.length).split(path.sep).filter(Boolean)) {
+    current = path.join(current, component);
+    try {
+      if (lstatSync(current).isSymbolicLink()) unavailable("The configured state root must not traverse symbolic links.");
+    } catch (error) {
+      if (error instanceof Error && error.name === "BetaError") throw error;
+      if (isMissing(error)) return;
+      unavailable("Unable to inspect the configured state root.");
+    }
+  }
+}
+
 function intendedStateRoot(stateRoot: string): string {
   const rawParts = stateRoot.split(path.sep);
   if (rawParts.includes("..")) unavailable("The configured state root must not traverse parent directories.");
   const resolved = path.resolve(stateRoot);
+  assertNoSymlinkComponents(resolved);
   let existing = resolved;
   const remaining: string[] = [];
   while (true) {
@@ -45,6 +66,7 @@ function intendedStateRoot(stateRoot: string): string {
       break;
     } catch (error) {
       if (error instanceof Error && error.name === "BetaError") throw error;
+      if (!isMissing(error)) unavailable("Unable to inspect the configured state root.");
       const parent = path.dirname(existing);
       if (parent === existing) unavailable("The configured state root has no existing parent directory.");
       remaining.unshift(path.basename(existing));

@@ -18,7 +18,7 @@ function errorCode(code: string) {
 }
 
 function makeWorkspace(remote = "https://user:token@github.com/patternstatic/trajecta-memory.git") {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "trajecta-workspace-"));
+  const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "trajecta-workspace-"));
   execFileSync("git", ["init", "-b", "main", root]);
   execFileSync("git", ["config", "user.name", "Trajecta Test"], { cwd: root });
   execFileSync("git", ["config", "user.email", "test@example.invalid"], { cwd: root });
@@ -29,6 +29,10 @@ function makeWorkspace(remote = "https://user:token@github.com/patternstatic/tra
 
 function registryFor(stateRoot: string, now: Date) {
   return new TargetRegistry({ stateRoot, clock: () => now, randomBytes: (size) => Buffer.alloc(size, 7) });
+}
+
+function targetRecordFile(observation: { stateRoot: string }, targetId: string) {
+  return path.join(observation.stateRoot, "targets", `${createHash("sha256").update(targetId).digest("hex")}.json`);
 }
 
 test("normalizes supported Git remote forms without preserving credentials", () => {
@@ -156,6 +160,163 @@ test("reserve and consume are idempotent only for the same operation, attempt, a
     registry.consume(card, "operation:one", "receipt:one");
     registry.consume(card, "operation:one", "receipt:one");
     assert.throws(() => registry.consume(card, "operation:two", "receipt:two"), errorCode("TARGET_CONSUMED"));
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+    fs.rmSync(fixture.stateRoot, { recursive: true, force: true });
+  }
+});
+
+test("reserve rejects a concurrent contender while its real per-target transition is held", () => {
+  const fixture = makeWorkspace();
+  const now = new Date("2026-09-05T00:00:00.000Z");
+  try {
+    const observation = observeWorkspace(fixture.root, fixture.stateRoot);
+    const contender = registryFor(observation.stateRoot, now);
+    const issuer = registryFor(observation.stateRoot, now);
+    const card = issuer.issue(observation);
+    let contenderFailure: unknown;
+    const owner = new TargetRegistry({
+      stateRoot: observation.stateRoot,
+      clock: () => now,
+      onTargetLockAcquired: () => {
+        try {
+          contender.reserve(card, "operation:contender", "b".repeat(64), now);
+        } catch (error) {
+          contenderFailure = error;
+        }
+      },
+    });
+    owner.reserve(card, "operation:owner", "a".repeat(64), now);
+    assert.ok(errorCode("OPERATION_IN_DOUBT")(contenderFailure));
+    const record = JSON.parse(fs.readFileSync(targetRecordFile(observation, card.targetId), "utf8"));
+    assert.equal(record.state, "reserved");
+    assert.equal(record.operationId, "operation:owner");
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+    fs.rmSync(fixture.stateRoot, { recursive: true, force: true });
+  }
+});
+
+test("consume rejects a concurrent contender while its real per-target transition is held", () => {
+  const fixture = makeWorkspace();
+  const now = new Date("2026-09-05T00:00:00.000Z");
+  try {
+    const observation = observeWorkspace(fixture.root, fixture.stateRoot);
+    const issuer = registryFor(observation.stateRoot, now);
+    const card = issuer.issue(observation);
+    issuer.reserve(card, "operation:owner", "a".repeat(64), now);
+    const contender = registryFor(observation.stateRoot, now);
+    let contenderFailure: unknown;
+    const owner = new TargetRegistry({
+      stateRoot: observation.stateRoot,
+      clock: () => now,
+      onTargetLockAcquired: () => {
+        try {
+          contender.consume(card, "operation:owner", "receipt:contender");
+        } catch (error) {
+          contenderFailure = error;
+        }
+      },
+    });
+    owner.consume(card, "operation:owner", "receipt:owner");
+    assert.ok(errorCode("OPERATION_IN_DOUBT")(contenderFailure));
+    const record = JSON.parse(fs.readFileSync(targetRecordFile(observation, card.targetId), "utf8"));
+    assert.equal(record.state, "consumed");
+    assert.equal(record.receiptId, "receipt:owner");
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+    fs.rmSync(fixture.stateRoot, { recursive: true, force: true });
+  }
+});
+
+test("reserve refuses crash-left and symlinked per-target locks without removing them", () => {
+  const fixture = makeWorkspace();
+  const now = new Date("2026-09-05T00:00:00.000Z");
+  try {
+    const observation = observeWorkspace(fixture.root, fixture.stateRoot);
+    const registry = registryFor(observation.stateRoot, now);
+    const card = registry.issue(observation);
+    const lock = targetRecordFile(observation, card.targetId).replace(/\.json$/, ".lock");
+    fs.writeFileSync(lock, "crash-left", { mode: 0o600 });
+    assert.throws(() => registry.reserve(card, "operation:owner", "a".repeat(64), now), errorCode("OPERATION_IN_DOUBT"));
+    assert.equal(fs.readFileSync(lock, "utf8"), "crash-left");
+    fs.unlinkSync(lock);
+    fs.symlinkSync(targetRecordFile(observation, card.targetId), lock);
+    assert.throws(() => registry.reserve(card, "operation:owner", "a".repeat(64), now), errorCode("OPERATION_IN_DOUBT"));
+    assert.ok(fs.lstatSync(lock).isSymbolicLink());
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+    fs.rmSync(fixture.stateRoot, { recursive: true, force: true });
+  }
+});
+
+test("workspace and registry reject symlinked state-root and targets ancestors", () => {
+  const fixture = makeWorkspace();
+  const now = new Date("2026-09-05T00:00:00.000Z");
+  const externalState = `${fixture.stateRoot}-external`;
+  const externalTargets = path.join(fixture.root, "external-targets");
+  try {
+    const observation = observeWorkspace(fixture.root, fixture.stateRoot);
+    const registry = registryFor(observation.stateRoot, now);
+    const card = registry.issue(observation);
+    fs.renameSync(observation.stateRoot, externalState);
+    fs.symlinkSync(externalState, observation.stateRoot);
+    assert.throws(() => observeWorkspace(fixture.root, path.join(observation.stateRoot, "child")), errorCode("CAPABILITY_UNAVAILABLE"));
+    assert.throws(() => registry.lookup(card, now), errorCode("OPERATION_IN_DOUBT"));
+    fs.unlinkSync(observation.stateRoot);
+    fs.renameSync(externalState, observation.stateRoot);
+    fs.renameSync(path.join(observation.stateRoot, "targets"), externalTargets);
+    fs.symlinkSync(externalTargets, path.join(observation.stateRoot, "targets"));
+    assert.throws(() => registry.lookup(card, now), errorCode("OPERATION_IN_DOUBT"));
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+    fs.rmSync(fixture.stateRoot, { recursive: true, force: true });
+    fs.rmSync(externalState, { recursive: true, force: true });
+  }
+});
+
+test("registry rejects insecure private directory and record modes", () => {
+  const fixture = makeWorkspace();
+  const now = new Date("2026-09-05T00:00:00.000Z");
+  try {
+    const observation = observeWorkspace(fixture.root, fixture.stateRoot);
+    const registry = registryFor(observation.stateRoot, now);
+    const card = registry.issue(observation);
+    assert.equal(fs.statSync(observation.stateRoot).mode & 0o777, 0o700);
+    assert.equal(fs.statSync(path.join(observation.stateRoot, "targets")).mode & 0o777, 0o700);
+    assert.equal(fs.statSync(targetRecordFile(observation, card.targetId)).mode & 0o777, 0o600);
+    fs.chmodSync(observation.stateRoot, 0o755);
+    assert.throws(() => registry.lookup(card, now), errorCode("OPERATION_IN_DOUBT"));
+    fs.chmodSync(observation.stateRoot, 0o700);
+    fs.chmodSync(path.join(observation.stateRoot, "targets"), 0o755);
+    assert.throws(() => registry.lookup(card, now), errorCode("OPERATION_IN_DOUBT"));
+    fs.chmodSync(path.join(observation.stateRoot, "targets"), 0o700);
+    fs.chmodSync(targetRecordFile(observation, card.targetId), 0o644);
+    assert.throws(() => registry.lookup(card, now), errorCode("OPERATION_IN_DOUBT"));
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+    fs.rmSync(fixture.stateRoot, { recursive: true, force: true });
+  }
+});
+
+test("registry treats impossible issued, reserved, and consumed record combinations as in-doubt", () => {
+  const fixture = makeWorkspace();
+  const now = new Date("2026-09-05T00:00:00.000Z");
+  try {
+    const observation = observeWorkspace(fixture.root, fixture.stateRoot);
+    const registry = new TargetRegistry({ stateRoot: observation.stateRoot, clock: () => now });
+    const cards = [registry.issue(observation), registry.issue(observation), registry.issue(observation)];
+    const mutations = [
+      { state: "issued", operationId: "operation:impossible", attemptDigest: "a".repeat(64), receiptId: null },
+      { state: "reserved", operationId: "operation:impossible", attemptDigest: null, receiptId: null },
+      { state: "consumed", operationId: "operation:impossible", attemptDigest: "a".repeat(64), receiptId: null },
+    ];
+    for (let index = 0; index < cards.length; index++) {
+      const file = targetRecordFile(observation, cards[index]!.targetId);
+      const record = JSON.parse(fs.readFileSync(file, "utf8"));
+      fs.writeFileSync(file, JSON.stringify({ ...record, ...mutations[index] }));
+      assert.throws(() => registry.lookup(cards[index]!, now), errorCode("OPERATION_IN_DOUBT"));
+    }
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
     fs.rmSync(fixture.stateRoot, { recursive: true, force: true });

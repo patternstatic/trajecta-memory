@@ -2,7 +2,14 @@ import { randomBytes as systemRandomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync, lstatSync } from "node:fs";
 import path from "node:path";
 import type { LocalWorkspaceTargetCardV1 } from "./contracts.ts";
-import { ensurePrivateDirectory, readJsonFile, writeJsonAtomic, writeJsonExclusive } from "./durable-file.ts";
+import {
+  acquirePrivateLock,
+  assertPrivateDirectory,
+  ensurePrivateDirectory,
+  readJsonFile,
+  writeJsonAtomic,
+  writeJsonExclusive,
+} from "./durable-file.ts";
 import { betaError } from "./errors.ts";
 import { sha256, type WorkspaceObservation } from "./workspace.ts";
 
@@ -26,6 +33,7 @@ export interface TargetRegistryOptions {
   stateRoot: string;
   clock?: () => Date;
   randomBytes?: (size: number) => Uint8Array;
+  onTargetLockAcquired?: (transition: "reserve" | "consume", targetId: string) => void;
 }
 
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -67,8 +75,13 @@ function validRecord(value: unknown): value is TargetRecordV1 {
   if (record.operationId !== null && typeof record.operationId !== "string") return false;
   if (record.attemptDigest !== null && (typeof record.attemptDigest !== "string" || !SHA256.test(record.attemptDigest))) return false;
   if (record.receiptId !== null && typeof record.receiptId !== "string") return false;
+  const stateFieldsAreConsistent = record.state === "issued"
+    ? record.operationId === null && record.attemptDigest === null && record.receiptId === null
+    : record.state === "reserved"
+      ? typeof record.operationId === "string" && typeof record.attemptDigest === "string" && record.receiptId === null
+      : typeof record.operationId === "string" && typeof record.attemptDigest === "string" && typeof record.receiptId === "string";
   const workspace = record.workspace as Record<string, unknown>;
-  return !!workspace && typeof workspace === "object" && !Array.isArray(workspace)
+  return stateFieldsAreConsistent && !!workspace && typeof workspace === "object" && !Array.isArray(workspace)
     && typeof workspace.repository === "string"
     && typeof workspace.repositoryFingerprint === "string" && SHA256.test(workspace.repositoryFingerprint)
     && typeof workspace.stateRootFingerprint === "string" && SHA256.test(workspace.stateRootFingerprint)
@@ -81,6 +94,7 @@ export class TargetRegistry {
   private readonly randomBytes: (size: number) => Uint8Array;
   private readonly stateRootFingerprint: string;
   private readonly registryFingerprint: string;
+  private readonly onTargetLockAcquired: ((transition: "reserve" | "consume", targetId: string) => void) | undefined;
 
   constructor(options: TargetRegistryOptions) {
     this.stateRoot = path.resolve(options.stateRoot);
@@ -88,6 +102,7 @@ export class TargetRegistry {
     this.randomBytes = options.randomBytes ?? systemRandomBytes;
     this.stateRootFingerprint = sha256(this.stateRoot);
     this.registryFingerprint = sha256(`trajecta.local-registry/v1\0${this.stateRootFingerprint}`);
+    this.onTargetLockAcquired = options.onTargetLockAcquired;
   }
 
   issue(observation: WorkspaceObservation, now = this.clock()): LocalWorkspaceTargetCardV1 {
@@ -127,7 +142,7 @@ export class TargetRegistry {
       attemptDigest: null,
       receiptId: null,
     };
-    ensurePrivateDirectory(this.targetsDirectory());
+    this.ensureRegistryDirectories();
     writeJsonExclusive(this.recordFile(targetId), record);
     return card;
   }
@@ -141,31 +156,32 @@ export class TargetRegistry {
   reserve(card: LocalWorkspaceTargetCardV1, operationId: string, attemptDigest: string, now = this.clock()): void {
     opaqueId(operationId, "Operation ID");
     if (!SHA256.test(attemptDigest)) throw betaError("OPERATION_CONFLICT", "Attempt digest must be a SHA-256 digest.");
-    const record = this.readVerified(card);
-    if (record.state === "reserved") {
-      if (record.operationId === operationId && record.attemptDigest === attemptDigest) return;
-      if (record.operationId === operationId) throw betaError("OPERATION_CONFLICT", "A different attempt is already reserved for this operation.");
-      throw betaError("TARGET_CONSUMED", "The local target is reserved by another operation.");
-    }
-    if (record.state === "consumed") throw betaError("TARGET_CONSUMED", "The local target has already been consumed.");
-    this.requireFresh(record, now);
-    const reserved: TargetRecordV1 = { ...record, state: "reserved", operationId, attemptDigest };
-    writeJsonAtomic(this.recordFile(record.targetId), reserved);
+    this.withTargetTransition(card, "reserve", (record) => {
+      if (record.state === "reserved") {
+        if (record.operationId === operationId && record.attemptDigest === attemptDigest) return;
+        if (record.operationId === operationId) throw betaError("OPERATION_CONFLICT", "A different attempt is already reserved for this operation.");
+        throw betaError("TARGET_CONSUMED", "The local target is reserved by another operation.");
+      }
+      if (record.state === "consumed") throw betaError("TARGET_CONSUMED", "The local target has already been consumed.");
+      this.requireFresh(record, now);
+      writeJsonAtomic(this.recordFile(record.targetId), { ...record, state: "reserved", operationId, attemptDigest });
+    });
   }
 
   consume(card: LocalWorkspaceTargetCardV1, operationId: string, receiptId: string): void {
     opaqueId(operationId, "Operation ID");
     opaqueId(receiptId, "Receipt ID");
-    const record = this.readVerified(card);
-    if (record.state === "consumed") {
-      if (record.operationId === operationId && record.receiptId === receiptId) return;
-      if (record.operationId === operationId) throw betaError("OPERATION_CONFLICT", "A different receipt is already recorded for this operation.");
-      throw betaError("TARGET_CONSUMED", "The local target has already been consumed.");
-    }
-    if (record.state !== "reserved" || record.operationId !== operationId) {
-      throw betaError("TARGET_CONSUMED", "The local target is not reserved by this operation.");
-    }
-    writeJsonAtomic(this.recordFile(record.targetId), { ...record, state: "consumed", receiptId });
+    this.withTargetTransition(card, "consume", (record) => {
+      if (record.state === "consumed") {
+        if (record.operationId === operationId && record.receiptId === receiptId) return;
+        if (record.operationId === operationId) throw betaError("OPERATION_CONFLICT", "A different receipt is already recorded for this operation.");
+        throw betaError("TARGET_CONSUMED", "The local target has already been consumed.");
+      }
+      if (record.state !== "reserved" || record.operationId !== operationId) {
+        throw betaError("TARGET_CONSUMED", "The local target is not reserved by this operation.");
+      }
+      writeJsonAtomic(this.recordFile(record.targetId), { ...record, state: "consumed", receiptId });
+    });
   }
 
   private targetsDirectory(): string {
@@ -176,8 +192,41 @@ export class TargetRegistry {
     return path.join(this.targetsDirectory(), `${sha256(targetId)}.json`);
   }
 
+  private lockFile(targetId: string): string {
+    return path.join(this.targetsDirectory(), `${sha256(targetId)}.lock`);
+  }
+
+  private ensureRegistryDirectories(): void {
+    ensurePrivateDirectory(this.stateRoot);
+    ensurePrivateDirectory(this.targetsDirectory());
+  }
+
+  private assertRegistryDirectories(): void {
+    assertPrivateDirectory(this.stateRoot);
+    assertPrivateDirectory(this.targetsDirectory());
+  }
+
+  private withTargetTransition(
+    card: LocalWorkspaceTargetCardV1,
+    transition: "reserve" | "consume",
+    action: (record: TargetRecordV1) => void,
+  ): void {
+    this.assertCard(card);
+    this.assertRegistryDirectories();
+    const owner = this.randomBytes(32);
+    if (owner.byteLength !== 32) throw betaError("CAPABILITY_UNAVAILABLE", "The configured random source did not return lock ownership bytes.");
+    const lock = acquirePrivateLock(this.lockFile(card.targetId), owner);
+    try {
+      this.onTargetLockAcquired?.(transition, card.targetId);
+      action(this.readVerified(card));
+    } finally {
+      lock.release();
+    }
+  }
+
   private readVerified(card: LocalWorkspaceTargetCardV1): TargetRecordV1 {
     this.assertCard(card);
+    this.assertRegistryDirectories();
     const file = this.recordFile(card.targetId);
     if (!existsSync(file)) throw betaError("TARGET_MISMATCH", "The local target does not exist in this registry.");
     const entry = lstatSync(file);

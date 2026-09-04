@@ -12,7 +12,7 @@ import {
   writeSync,
 } from "node:fs";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { BetaError, betaError } from "./errors.ts";
 import { parseStrictJsonBytes } from "./strict-json.ts";
 
@@ -45,7 +45,30 @@ function assertPrivatePath(directory: string): void {
   }
 }
 
+function assertMode(mode: number, expected: number, label: string): void {
+  if ((mode & 0o777) !== expected) {
+    throw betaError("OPERATION_IN_DOUBT", `${label} has insecure permissions.`);
+  }
+}
+
+export function assertPrivateDirectory(directory: string): void {
+  const resolved = path.resolve(directory);
+  assertPrivatePath(resolved);
+  let entry;
+  try {
+    entry = lstatSync(resolved);
+  } catch (error) {
+    if (isMissing(error)) throw betaError("OPERATION_IN_DOUBT", "A required private state directory is missing.");
+    throw betaError("OPERATION_IN_DOUBT", "Unable to inspect a private state directory.");
+  }
+  if (entry.isSymbolicLink() || !entry.isDirectory()) {
+    throw betaError("OPERATION_IN_DOUBT", "Private state directories must not be symbolic links.");
+  }
+  assertMode(entry.mode, 0o700, "Private state directory");
+}
+
 function assertRegularFile(file: string): void {
+  assertPrivatePath(path.dirname(file));
   let entry;
   try {
     entry = lstatSync(file);
@@ -56,6 +79,7 @@ function assertRegularFile(file: string): void {
   if (entry.isSymbolicLink() || !entry.isFile()) {
     throw betaError("OPERATION_IN_DOUBT", "Private state files must be regular files.");
   }
+  assertMode(entry.mode, 0o600, "Private state file");
 }
 
 function fsyncDirectory(directory: string): void {
@@ -120,6 +144,7 @@ export function ensurePrivateDirectory(directory: string): void {
     if (error instanceof Error && error.name === "BetaError") throw error;
     throw betaError("OPERATION_IN_DOUBT", "Unable to create the private state directory.");
   }
+  assertPrivateDirectory(resolved);
 }
 
 export function writeBytesExclusive(file: string, bytes: Uint8Array): void {
@@ -152,6 +177,15 @@ export function writeJsonAtomic(file: string, value: unknown): void {
 }
 
 export function readJsonFile(file: string): unknown {
+  const { bytes } = readPrivateBytes(file);
+  try {
+    return parseStrictJsonBytes(bytes);
+  } catch {
+    throw betaError("OPERATION_IN_DOUBT", "Private state JSON is malformed or unavailable.");
+  }
+}
+
+function readPrivateBytes(file: string): { bytes: Buffer; dev: number; ino: number } {
   assertRegularFile(file);
   let descriptor = -1;
   try {
@@ -171,11 +205,39 @@ export function readJsonFile(file: string): unknown {
     if (final.size !== initial.size || final.dev !== initial.dev || final.ino !== initial.ino) {
       throw betaError("OPERATION_IN_DOUBT", "Private state file changed during read.");
     }
-    return parseStrictJsonBytes(bytes);
+    return { bytes, dev: final.dev, ino: final.ino };
   } catch (error) {
     if (error instanceof BetaError && error.code === "OPERATION_IN_DOUBT") throw error;
-    throw betaError("OPERATION_IN_DOUBT", "Private state JSON is malformed or unavailable.");
+    throw betaError("OPERATION_IN_DOUBT", "Private state bytes are malformed or unavailable.");
   } finally {
     if (descriptor >= 0) closeSync(descriptor);
   }
+}
+
+export interface PrivateLock {
+  release(): void;
+}
+
+export function acquirePrivateLock(file: string, owner: Uint8Array): PrivateLock {
+  if (owner.byteLength === 0) throw betaError("OPERATION_IN_DOUBT", "Private lock ownership bytes are required.");
+  writeExclusive(file, owner);
+  return {
+    release() {
+      const captured = readPrivateBytes(file);
+      if (captured.bytes.byteLength !== owner.byteLength || !timingSafeEqual(captured.bytes, owner)) {
+        throw betaError("OPERATION_IN_DOUBT", "Private lock ownership changed before release.");
+      }
+      const current = lstatSync(file);
+      if (current.isSymbolicLink() || !current.isFile() || current.dev !== captured.dev || current.ino !== captured.ino) {
+        throw betaError("OPERATION_IN_DOUBT", "Private lock changed before release.");
+      }
+      try {
+        unlinkSync(file);
+        fsyncDirectory(path.dirname(file));
+      } catch (error) {
+        if (error instanceof BetaError) throw error;
+        throw betaError("OPERATION_IN_DOUBT", "Unable to release the private lock.");
+      }
+    },
+  };
 }
