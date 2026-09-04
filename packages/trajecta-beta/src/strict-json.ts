@@ -178,6 +178,10 @@ export function parseStrictJsonBytes(bytes: Uint8Array): unknown {
 }
 
 export function parseStrictJsonText(text: string): unknown {
+  const byteLength = Buffer.byteLength(text, "utf8");
+  if (byteLength > MAX_ENVELOPE_BYTES) {
+    throw betaError("FILE_TOO_LARGE", `JSON input is ${byteLength} bytes; the maximum is ${MAX_ENVELOPE_BYTES}.`);
+  }
   try {
     return new JsonParser(text).parse();
   } catch (error) {
@@ -187,9 +191,15 @@ export function parseStrictJsonText(text: string): unknown {
 }
 
 export function parseStrictJsonFile(file: string): unknown {
-  const fd = openSync(file, "r");
+  let fd = -1;
+  let value: unknown;
+  let failure: unknown;
   try {
-    const size = fstatSync(fd).size;
+    fd = openSync(file, "r");
+    const initial = fstatSync(fd);
+    if (!initial.isFile()) throw betaError("INVALID_JSON", "The JSON input is not a regular file.");
+    const size = initial.size;
+    if (!Number.isSafeInteger(size) || size < 0) throw betaError("INVALID_JSON", "The JSON file size is invalid.");
     if (size > MAX_ENVELOPE_BYTES) {
       throw betaError("FILE_TOO_LARGE", `JSON input is ${size} bytes; the maximum is ${MAX_ENVELOPE_BYTES}.`);
     }
@@ -200,8 +210,35 @@ export function parseStrictJsonFile(file: string): unknown {
       if (count === 0) throw betaError("INVALID_JSON", "The JSON file ended before all bytes could be read.");
       offset += count;
     }
-    return parseStrictJsonBytes(bytes);
+    const final = fstatSync(fd);
+    if (final.size > MAX_ENVELOPE_BYTES) {
+      throw betaError("FILE_TOO_LARGE", `JSON input is ${final.size} bytes; the maximum is ${MAX_ENVELOPE_BYTES}.`);
+    }
+    if (
+      final.size !== initial.size ||
+      final.dev !== initial.dev ||
+      final.ino !== initial.ino ||
+      final.mode !== initial.mode ||
+      final.mtimeMs !== initial.mtimeMs ||
+      final.ctimeMs !== initial.ctimeMs
+    ) {
+      throw betaError("INVALID_JSON", "The JSON file changed while it was being read.");
+    }
+    value = parseStrictJsonBytes(bytes);
+  } catch (error) {
+    failure = error;
   } finally {
-    closeSync(fd);
+    if (fd >= 0) {
+      try {
+        closeSync(fd);
+      } catch (error) {
+        if (failure === undefined) failure = error;
+      }
+    }
   }
+  if (failure !== undefined) {
+    if (failure instanceof BetaError) throw failure;
+    throw betaError("INVALID_JSON", "Unable to read the JSON file.");
+  }
+  return value;
 }

@@ -35,7 +35,10 @@ function serialize(value: unknown, active: WeakSet<object>): string {
   try {
     if (Array.isArray(value)) {
       for (const key of Reflect.ownKeys(value)) {
-        if (typeof key === "symbol" || (key !== "length" && !/^\d+$/.test(key))) {
+        if (
+          key !== "length" &&
+          (typeof key === "symbol" || !/^(0|[1-9]\d*)$/.test(key) || Number(key) >= value.length)
+        ) {
           unsupported("Canonical JSON arrays may contain indexed values only.");
         }
       }
@@ -45,7 +48,9 @@ function serialize(value: unknown, active: WeakSet<object>): string {
           unsupported("Canonical JSON arrays may not contain holes.");
         }
         const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
-        if (!descriptor || !("value" in descriptor)) unsupported("Canonical JSON requires data properties.");
+        if (!descriptor || !("value" in descriptor) || !descriptor.enumerable) {
+          unsupported("Canonical JSON requires enumerable data properties.");
+        }
         items.push(serialize(descriptor.value, active));
       }
       return `[${items.join(",")}]`;
@@ -55,10 +60,16 @@ function serialize(value: unknown, active: WeakSet<object>): string {
     if (prototype !== Object.prototype && prototype !== null) {
       unsupported("Canonical JSON objects must use the default object prototype.");
     }
+    const keys: string[] = [];
     for (const key of Reflect.ownKeys(value)) {
       if (typeof key === "symbol") unsupported("Canonical JSON objects may not contain symbol keys.");
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!descriptor || !("value" in descriptor) || !descriptor.enumerable) {
+        unsupported("Canonical JSON requires enumerable data properties.");
+      }
+      keys.push(key);
     }
-    const keys = Object.keys(value).sort(compareCodeUnits);
+    keys.sort(compareCodeUnits);
     const properties = keys.map((key) => {
       const descriptor = Object.getOwnPropertyDescriptor(value, key);
       if (!descriptor || !("value" in descriptor)) unsupported("Canonical JSON requires data properties.");
