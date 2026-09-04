@@ -2,3 +2,5 @@ export { OperationConflict, RevisionConflict, TrajectaStore } from "./store.ts";
 export { TrajectaRelay } from "./relay.ts";
 export type * from "./types.ts";
 export type { HandoffInput, TransportReceipt } from "./relay.ts";
+export { assertResumeAttempt, digestResumeAttempt, stableSerialize } from "./adapters/proof/attempt-contract.ts";
+export type { ResumeAttemptCode, ResumeAttemptInputV1, ResumeAttemptReceiptV1, ResumeTargetV1 } from "./adapters/proof/attempt-contract.ts";
