@@ -10,7 +10,9 @@ import {
 } from "../src/index.ts";
 import type { ResumeAttemptInputV1, Surface } from "../src/index.ts";
 
-const root = fs.mkdtempSync(path.join(os.tmpdir(), "trajecta-verified-proof-"));
+const suppliedRoot = process.env.TRAJECTA_PROOF_ROOT;
+const root = suppliedRoot ?? fs.mkdtempSync(path.join(os.tmpdir(), "trajecta-verified-proof-"));
+const ownsRoot = suppliedRoot === undefined;
 const now = new Date("2026-09-04T00:00:00.000Z");
 const cloud: Surface = { kind: "cloud", name: "ChatGPT fixture", session: "cloud:proof" };
 const target = {
@@ -90,5 +92,5 @@ try {
   console.log(renderResumeReceipt(accepted));
   console.log(`\nRETRY B   same receipt / revision remains ${store.getWork(opened.work.id).revision}`);
 } finally {
-  fs.rmSync(root, { recursive: true, force: true });
+  if (ownsRoot) fs.rmSync(root, { recursive: true, force: true });
 }
