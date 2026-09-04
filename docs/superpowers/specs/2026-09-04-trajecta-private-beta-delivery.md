@@ -375,15 +375,21 @@ After unpacking, the tester runs:
 
 ```text
 trajecta-beta verify-acceptance \
+  --archive <downloaded-zip-path> \
+  --pinned-zip-sha256 <independently-obtained-value> \
   --bundle-root <unpacked-directory> \
   --public-key <independently-obtained-key> \
+  --state-root <new-test-directory>/.trajecta-beta-state \
   --evidence-dir <new-empty-directory>
 ```
 
 The command writes a machine-readable evidence set containing the archive
 allowlist audit, invoked commands, exit statuses, state/history/ledger hashes,
 target states, exact receipt bytes, normalized semantic traces, product
-version, and manual interventions.
+version, resolved state paths, and manual interventions. It hashes the original
+downloaded ZIP before inspecting the unpacked tree. In acceptance mode, `demo`,
+`host init`, `inspect`, `resume`, and `receipt` receive the one explicit state
+root; the SDK must not make any durable write outside it.
 
 1. ZIP checksum matches the separately pinned value and the receipt signature
    verifies against the independently obtained key;
@@ -399,7 +405,8 @@ version, and manual interventions.
 10. equivalent retry returns the original receipt byte-for-byte;
 11. altered operation reuse fails without a competing receipt;
 12. target-card expiry and single-use behavior pass;
-13. deleting the test directory removes all customer test state;
+13. every resolved durable state path is under the declared test state root,
+    and deleting the test directory removes all listed customer test state;
 14. another fresh directory reproduces the same semantic proof;
 15. an independent fresh-context operator receives only the delivered archive,
     pinned key, and `START-HERE.html`; receives no help for 15 minutes; and
