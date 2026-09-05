@@ -57,6 +57,23 @@ test("parses each supported command into its sole exact invocation", () => {
   assert.deepEqual(parseCliArgs(["resume", "handoff.json", "--accept"]), { kind: "resume", file: "handoff.json", stateRoot: null, accept: true });
   assert.deepEqual(parseCliArgs(["resume", "handoff.json", "--state-root", "state"]), { kind: "resume", file: "handoff.json", stateRoot: "state", accept: false });
   assert.deepEqual(parseCliArgs(["receipt", "operation:fixture", "--state-root", "state"]), { kind: "receipt", operationId: "operation:fixture", stateRoot: "state" });
+  assert.deepEqual(parseCliArgs([
+    "verify-acceptance",
+    "--archive", "/delivery.zip",
+    "--pinned-zip-sha256", "a".repeat(64),
+    "--bundle-root", "/unpacked",
+    "--public-key", "/independent-public.pem",
+    "--state-root", "/new-state",
+    "--evidence-dir", "/new-evidence",
+  ]), {
+    kind: "verify-acceptance",
+    archivePath: "/delivery.zip",
+    pinnedZipSha256: "a".repeat(64),
+    bundleRoot: "/unpacked",
+    publicKeyPath: "/independent-public.pem",
+    stateRoot: "/new-state",
+    evidenceDir: "/new-evidence",
+  });
   assert.deepEqual(parseCliArgs(["version"]), { kind: "version" });
 });
 
@@ -67,6 +84,10 @@ test("parser rejects ambiguous, repeated, empty, and equals-style arguments", ()
     ["doctor", "--state-root", ""], ["doctor", "--state-root"], ["resume", "handoff", "--accept", "--accept"],
     ["resume", "handoff", "--accept=value"], ["resume", "handoff", "--state-root=value"], ["doctor", "--state-root", "../outside"], ["inspect", ""],
     ["host"], ["host", "init", "--out"], ["version", "--state-root", "state"],
+    ["verify-acceptance", "--archive", "/delivery.zip"],
+    ["verify-acceptance", "--archive", "/delivery.zip", "--archive", "/other.zip", "--pinned-zip-sha256", "a".repeat(64), "--bundle-root", "/unpacked", "--public-key", "/key.pem", "--state-root", "/state", "--evidence-dir", "/evidence"],
+    ["verify-acceptance", "--archive", "/delivery.zip", "--pinned-zip-sha256", "a".repeat(64), "--bundle-root", "/unpacked", "--public-key", "/key.pem", "--state-root", "/state", "--evidence-dir", "/evidence", "--unknown", "value"],
+    ["doctor", "--archive", "/delivery.zip"],
   ]) assert.throws(() => parseCliArgs(argv), usageError, argv.join(" "));
 });
 

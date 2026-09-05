@@ -1,0 +1,10 @@
+Trajecta Verified Resume SDK Beta v0.1 — evaluation boundary
+
+This release-integrity artifact is for evaluation only. It is not for sale and
+does not activate a commercial offer, purchase, customer license, acceptance
+flow, refund policy, or support commitment.
+
+Commercial terms, if any, require separate approval before activation. Nothing
+in this file narrows, replaces, or restricts rights in Apache-licensed core
+components. Apache-covered material remains subject to the included Apache
+License and NOTICE.

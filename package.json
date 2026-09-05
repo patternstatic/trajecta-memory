@@ -27,6 +27,9 @@
     "beta:test": "node --experimental-strip-types --test packages/trajecta-beta/test/*.test.ts test/beta-parent-contract.test.ts test/store-recovery.test.ts",
     "beta:demo": "packages/trajecta-beta/bin/trajecta-beta demo",
     "beta:check": "npm run beta:test && npm run beta:demo",
+    "release:test": "node --experimental-strip-types --test tools/release-integrity/test/*.test.ts",
+    "release:check": "npm run release:test",
+    "release:evaluation": "tools/release-integrity/bin/trajecta-release build",
     "check": "npm test && npm run demo && npm run proof && npm run beta:check"
   },
   "engines": {

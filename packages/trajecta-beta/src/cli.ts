@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, realpathSync, writeSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { runAcceptance } from "./acceptance.ts";
 import { CliUsageError, parseCliArgs, resolveStateRoot } from "./args.ts";
 import { canonicalJson } from "./canonical.ts";
 import { PRODUCT_NAME, PRODUCT_VERSION, runDoctor } from "./doctor.ts";
@@ -10,6 +11,7 @@ import { BetaError, betaError } from "./errors.ts";
 import { createLocalKernelPort } from "./kernel-port.ts";
 import { OperationJournal } from "./operation-journal.ts";
 import { ReceiptStore } from "./receipt-store.ts";
+import { ReleaseIntegrityError } from "./release/errors.ts";
 import { LocalResumeService } from "./resume-service.ts";
 import { TargetRegistry } from "./target-registry.ts";
 import { gitEnvironment, observeWorkspace, type WorkspaceObservation } from "./workspace.ts";
@@ -81,6 +83,20 @@ export async function runCli(argv: readonly string[], cwd: string, io: CliIO): P
       await runDemo({ ...(invocation.stateRoot === null ? {} : { stateRoot: path.resolve(cwd, invocation.stateRoot) }), output: text => io.stdout(text) });
       return 0;
     }
+    if (invocation.kind === "verify-acceptance") {
+      const installedPackageRoot = fileURLToPath(new URL("../..", import.meta.url));
+      const result = await runAcceptance({
+        archivePath: invocation.archivePath,
+        pinnedZipSha256: invocation.pinnedZipSha256,
+        bundleRoot: invocation.bundleRoot,
+        publicKeyPath: invocation.publicKeyPath,
+        installedPackageRoot,
+        stateRoot: invocation.stateRoot,
+        evidenceDir: invocation.evidenceDir,
+        bin: path.join(installedPackageRoot, "bin", "trajecta-beta"),
+      });
+      io.stdout(display(result)); return 0;
+    }
     const observed = workspace(cwd, invocation.stateRoot);
     if (invocation.kind === "host-init") {
       hostInit(observed, cwd, invocation.out);
@@ -98,11 +114,14 @@ export async function runCli(argv: readonly string[], cwd: string, io: CliIO): P
     io.stdout(local.receiptBytes(invocation.operationId)); return 0;
   } catch (error) {
     if (error instanceof CliUsageError) {
-      io.stderr("USAGE: Use one supported command with its documented arguments.\nNext: Choose version, doctor, demo, host init, inspect <file>, resume <file> --accept, or receipt <operation-id>.\n"); return 2;
+      io.stderr("USAGE: Use one supported command with its documented arguments.\nNext: Choose version, doctor, demo, verify-acceptance, host init, inspect <file>, resume <file> --accept, or receipt <operation-id>.\n"); return 2;
     }
     if (error instanceof BetaError) {
       const safeError = JSON.parse(display({ explanation: error.message, next: error.nextAction }));
       io.stderr(`${error.code}: ${safeError.explanation.replace(/[\r\n]/g, " ")}\nNext: ${safeError.next.replace(/[\r\n]/g, " ")}\n`); return 2;
+    }
+    if (error instanceof ReleaseIntegrityError) {
+      io.stderr(`${error.code}: The delivered release did not pass verification.\nNext: Keep delivery files unchanged and compare them with independent pins before retrying.\n`); return 2;
     }
     io.stderr("INTERNAL_ERROR: The local command could not complete safely.\nNext: Inspect local state before retrying and report this failure.\n"); return 1;
   }

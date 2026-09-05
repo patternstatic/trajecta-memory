@@ -7,6 +7,15 @@ export type CliInvocation =
   | { kind: "inspect"; file: string; stateRoot: string | null }
   | { kind: "resume"; file: string; stateRoot: string | null; accept: boolean }
   | { kind: "receipt"; operationId: string; stateRoot: string | null }
+  | {
+      kind: "verify-acceptance";
+      archivePath: string;
+      pinnedZipSha256: string;
+      bundleRoot: string;
+      publicKeyPath: string;
+      stateRoot: string;
+      evidenceDir: string;
+    }
   | { kind: "version" };
 
 export class CliUsageError extends Error {
@@ -53,6 +62,12 @@ function exactPositionals(tail: ParsedTail, count: number): string[] {
   return tail.positionals;
 }
 
+function requiredOption(options: Map<string, string | true>, name: string): string {
+  const value = options.get(name);
+  if (typeof value !== "string") invalid();
+  return value;
+}
+
 /** Strictly parse argv after the executable name; no aliases or equals-style flags. */
 export function parseCliArgs(argv: readonly string[]): CliInvocation {
   const [command, ...rest] = argv;
@@ -83,6 +98,19 @@ export function parseCliArgs(argv: readonly string[]): CliInvocation {
     const tail = parseTail(rest, ["--state-root"]);
     const [operationId] = exactPositionals(tail, 1);
     return { kind: "receipt", operationId: operationId!, stateRoot: stateRoot(tail.options) };
+  }
+  if (command === "verify-acceptance") {
+    const tail = parseTail(rest, ["--archive", "--pinned-zip-sha256", "--bundle-root", "--public-key", "--state-root", "--evidence-dir"]);
+    exactPositionals(tail, 0);
+    return {
+      kind: "verify-acceptance",
+      archivePath: requiredOption(tail.options, "--archive"),
+      pinnedZipSha256: requiredOption(tail.options, "--pinned-zip-sha256"),
+      bundleRoot: requiredOption(tail.options, "--bundle-root"),
+      publicKeyPath: requiredOption(tail.options, "--public-key"),
+      stateRoot: requiredOption(tail.options, "--state-root"),
+      evidenceDir: requiredOption(tail.options, "--evidence-dir"),
+    };
   }
   if (command === "version") {
     const tail = parseTail(rest, []);

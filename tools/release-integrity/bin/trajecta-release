@@ -1,0 +1,10 @@
+#!/usr/bin/env -S node --experimental-strip-types
+import { runReleaseCli } from "../src/cli.ts";
+
+try {
+  process.stdout.write(runReleaseCli(process.argv.slice(2), process.cwd()));
+} catch (error) {
+  const code = error && typeof error === "object" && "code" in error ? String(error.code) : "RELEASE_FAILED";
+  process.stderr.write(`${code}: Release command did not complete.\n`);
+  process.exitCode = 1;
+}
