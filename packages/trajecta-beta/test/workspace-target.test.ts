@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -32,7 +32,58 @@ function registryFor(stateRoot: string, now: Date) {
 }
 
 function targetRecordFile(observation: { stateRoot: string }, targetId: string) {
-  return path.join(observation.stateRoot, "targets", `${createHash("sha256").update(targetId).digest("hex")}.json`);
+  return path.join(observation.stateRoot, "targets", `${createHash("sha256").update(targetId).digest("hex")}.journal`);
+}
+
+function targetLockFile(observation: { stateRoot: string }, targetId: string) {
+  return path.join(observation.stateRoot, "targets", `${createHash("sha256").update(targetId).digest("hex")}.lock`);
+}
+
+function journalRecords(file: string): Record<string, unknown>[] {
+  const text = fs.readFileSync(file, "utf8");
+  assert.ok(text.endsWith("\n"));
+  return text.trimEnd().split("\n").map((line) => JSON.parse(line));
+}
+
+function writeJournal(file: string, records: readonly Record<string, unknown>[]) {
+  fs.writeFileSync(file, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`);
+}
+
+async function waitForChildOutput(child: ReturnType<typeof spawn>, expected: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error(`Timed out waiting for child output: ${expected}`)), 2_000);
+    child.stdout?.on("data", (chunk) => {
+      if (chunk.toString("utf8").includes(expected)) {
+        clearTimeout(timeout);
+        resolve();
+      }
+    });
+    child.once("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.once("exit", (code) => {
+      if (code !== 0) {
+        clearTimeout(timeout);
+        reject(new Error(`Child exited before signaling: ${code}`));
+      }
+    });
+  });
+}
+
+function waitForChildExit(child: ReturnType<typeof spawn>): Promise<void> {
+  return new Promise((resolve, reject) => child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`Child exited: ${code}`))));
+}
+
+function spawnContendingConsume(stateRoot: string, card: unknown, operationId: string, receiptId: string) {
+  const moduleUrl = new URL("../src/index.ts", import.meta.url).href;
+  const source = [
+    `import { TargetRegistry } from ${JSON.stringify(moduleUrl)};`,
+    "const [stateRoot, cardText, operationId, receiptId] = process.argv.slice(1);",
+    "const registry = new TargetRegistry({ stateRoot, onTargetLockAcquired: () => { process.stdout.write('locked\\n'); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100); } });",
+    "registry.consume(JSON.parse(cardText), operationId, receiptId);",
+  ].join("\n");
+  return spawn(process.execPath, ["--experimental-strip-types", "--input-type=module", "--eval", source, stateRoot, JSON.stringify(card), operationId, receiptId], { stdio: ["ignore", "pipe", "pipe"] });
 }
 
 test("normalizes supported Git remote forms without preserving credentials", () => {
@@ -81,7 +132,7 @@ test("registry persists capability hash but never raw capability", () => {
   try {
     const observation = observeWorkspace(fixture.root, fixture.stateRoot);
     const card = registryFor(observation.stateRoot, now).issue(observation);
-    const record = fs.readFileSync(path.join(observation.stateRoot, "targets", `${createHash("sha256").update(card.targetId).digest("hex")}.json`), "utf8");
+    const record = fs.readFileSync(targetRecordFile(observation, card.targetId), "utf8");
     assert.ok(record.includes(createHash("sha256").update(card.capability).digest("hex")));
     assert.ok(!record.includes(card.capability));
   } finally {
@@ -134,7 +185,7 @@ test("lookup rejects an expired target and reserve rechecks expiry without chang
     const registry = registryFor(observation.stateRoot, issuedAt);
     const card = registry.issue(observation);
     registry.lookup(card, new Date("2026-09-05T00:29:59.999Z"));
-    const recordFile = path.join(observation.stateRoot, "targets", `${createHash("sha256").update(card.targetId).digest("hex")}.json`);
+    const recordFile = targetRecordFile(observation, card.targetId);
     const before = fs.readFileSync(recordFile, "utf8");
     assert.throws(() => registry.lookup(card, expiredAt), errorCode("TARGET_EXPIRED"));
     assert.throws(() => registry.reserve(card, "operation:late", "a".repeat(64), expiredAt), errorCode("TARGET_EXPIRED"));
@@ -188,7 +239,7 @@ test("reserve rejects a concurrent contender while its real per-target transitio
     });
     owner.reserve(card, "operation:owner", "a".repeat(64), now);
     assert.ok(errorCode("OPERATION_IN_DOUBT")(contenderFailure));
-    const record = JSON.parse(fs.readFileSync(targetRecordFile(observation, card.targetId), "utf8"));
+    const record = journalRecords(targetRecordFile(observation, card.targetId)).at(-1)!;
     assert.equal(record.state, "reserved");
     assert.equal(record.operationId, "operation:owner");
   } finally {
@@ -220,7 +271,7 @@ test("consume rejects a concurrent contender while its real per-target transitio
     });
     owner.consume(card, "operation:owner", "receipt:owner");
     assert.ok(errorCode("OPERATION_IN_DOUBT")(contenderFailure));
-    const record = JSON.parse(fs.readFileSync(targetRecordFile(observation, card.targetId), "utf8"));
+    const record = journalRecords(targetRecordFile(observation, card.targetId)).at(-1)!;
     assert.equal(record.state, "consumed");
     assert.equal(record.receiptId, "receipt:owner");
   } finally {
@@ -229,17 +280,14 @@ test("consume rejects a concurrent contender while its real per-target transitio
   }
 });
 
-test("reserve refuses crash-left and symlinked per-target locks without removing them", () => {
+test("reserve refuses a symlinked persistent per-target lock without removing it", () => {
   const fixture = makeWorkspace();
   const now = new Date("2026-09-05T00:00:00.000Z");
   try {
     const observation = observeWorkspace(fixture.root, fixture.stateRoot);
     const registry = registryFor(observation.stateRoot, now);
     const card = registry.issue(observation);
-    const lock = targetRecordFile(observation, card.targetId).replace(/\.json$/, ".lock");
-    fs.writeFileSync(lock, "crash-left", { mode: 0o600 });
-    assert.throws(() => registry.reserve(card, "operation:owner", "a".repeat(64), now), errorCode("OPERATION_IN_DOUBT"));
-    assert.equal(fs.readFileSync(lock, "utf8"), "crash-left");
+    const lock = targetLockFile(observation, card.targetId);
     fs.unlinkSync(lock);
     fs.symlinkSync(targetRecordFile(observation, card.targetId), lock);
     assert.throws(() => registry.reserve(card, "operation:owner", "a".repeat(64), now), errorCode("OPERATION_IN_DOUBT"));
@@ -285,6 +333,7 @@ test("registry rejects insecure private directory and record modes", () => {
     assert.equal(fs.statSync(observation.stateRoot).mode & 0o777, 0o700);
     assert.equal(fs.statSync(path.join(observation.stateRoot, "targets")).mode & 0o777, 0o700);
     assert.equal(fs.statSync(targetRecordFile(observation, card.targetId)).mode & 0o777, 0o600);
+    assert.equal(fs.statSync(targetLockFile(observation, card.targetId)).mode & 0o777, 0o600);
     fs.chmodSync(observation.stateRoot, 0o755);
     assert.throws(() => registry.lookup(card, now), errorCode("OPERATION_IN_DOUBT"));
     fs.chmodSync(observation.stateRoot, 0o700);
@@ -292,6 +341,9 @@ test("registry rejects insecure private directory and record modes", () => {
     assert.throws(() => registry.lookup(card, now), errorCode("OPERATION_IN_DOUBT"));
     fs.chmodSync(path.join(observation.stateRoot, "targets"), 0o700);
     fs.chmodSync(targetRecordFile(observation, card.targetId), 0o644);
+    assert.throws(() => registry.lookup(card, now), errorCode("OPERATION_IN_DOUBT"));
+    fs.chmodSync(targetRecordFile(observation, card.targetId), 0o600);
+    fs.chmodSync(targetLockFile(observation, card.targetId), 0o644);
     assert.throws(() => registry.lookup(card, now), errorCode("OPERATION_IN_DOUBT"));
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
@@ -313,11 +365,140 @@ test("registry treats impossible issued, reserved, and consumed record combinati
     ];
     for (let index = 0; index < cards.length; index++) {
       const file = targetRecordFile(observation, cards[index]!.targetId);
-      const record = JSON.parse(fs.readFileSync(file, "utf8"));
-      fs.writeFileSync(file, JSON.stringify({ ...record, ...mutations[index] }));
+      const record = journalRecords(file)[0]!;
+      writeJournal(file, [{ ...record, ...mutations[index] }]);
       assert.throws(() => registry.lookup(cards[index]!, now), errorCode("OPERATION_IN_DOUBT"));
     }
   } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+    fs.rmSync(fixture.stateRoot, { recursive: true, force: true });
+  }
+});
+
+test("target state uses a newline-terminated append-only journal and rejects torn or illegal chains", () => {
+  const fixture = makeWorkspace();
+  const now = new Date("2026-09-05T00:00:00.000Z");
+  try {
+    const observation = observeWorkspace(fixture.root, fixture.stateRoot);
+    const registry = registryFor(observation.stateRoot, now);
+    const card = registry.issue(observation);
+    const journal = targetRecordFile(observation, card.targetId);
+    const [issued] = journalRecords(journal);
+    fs.appendFileSync(journal, '{"schema":"trajecta.local-target-record/v1"}');
+    assert.throws(() => registry.lookup(card, now), errorCode("OPERATION_IN_DOUBT"));
+    writeJournal(journal, [issued!, { ...issued!, state: "consumed", operationId: "operation:illegal", attemptDigest: "a".repeat(64), receiptId: "receipt:illegal" }]);
+    assert.throws(() => registry.lookup(card, now), errorCode("OPERATION_IN_DOUBT"));
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+    fs.rmSync(fixture.stateRoot, { recursive: true, force: true });
+  }
+});
+
+test("durable journal rejects empty opaque record identifiers", () => {
+  const fixture = makeWorkspace();
+  const now = new Date("2026-09-05T00:00:00.000Z");
+  try {
+    const observation = observeWorkspace(fixture.root, fixture.stateRoot);
+    const registry = registryFor(observation.stateRoot, now);
+    const card = registry.issue(observation);
+    const journal = targetRecordFile(observation, card.targetId);
+    const [issued] = journalRecords(journal);
+    writeJournal(journal, [{ ...issued!, targetId: "" }]);
+    assert.throws(() => registry.lookup(card, now), errorCode("OPERATION_IN_DOUBT"));
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+    fs.rmSync(fixture.stateRoot, { recursive: true, force: true });
+  }
+});
+
+test("same-receipt consume waits for a held kernel lock then returns idempotently", async () => {
+  const fixture = makeWorkspace();
+  const now = new Date("2026-09-05T00:00:00.000Z");
+  try {
+    const observation = observeWorkspace(fixture.root, fixture.stateRoot);
+    const registry = registryFor(observation.stateRoot, now);
+    const card = registry.issue(observation);
+    registry.reserve(card, "operation:owner", "a".repeat(64), now);
+    const child = spawnContendingConsume(observation.stateRoot, card, "operation:owner", "receipt:shared");
+    await waitForChildOutput(child, "locked");
+    registry.consume(card, "operation:owner", "receipt:shared");
+    await waitForChildExit(child);
+    registry.consume(card, "operation:owner", "receipt:shared");
+    assert.equal(journalRecords(targetRecordFile(observation, card.targetId)).at(-1)!.receiptId, "receipt:shared");
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+    fs.rmSync(fixture.stateRoot, { recursive: true, force: true });
+  }
+});
+
+test("different receipt consume waits for a held kernel lock then conflicts", async () => {
+  const fixture = makeWorkspace();
+  const now = new Date("2026-09-05T00:00:00.000Z");
+  try {
+    const observation = observeWorkspace(fixture.root, fixture.stateRoot);
+    const registry = registryFor(observation.stateRoot, now);
+    const card = registry.issue(observation);
+    registry.reserve(card, "operation:owner", "a".repeat(64), now);
+    const child = spawnContendingConsume(observation.stateRoot, card, "operation:owner", "receipt:child");
+    await waitForChildOutput(child, "locked");
+    assert.throws(() => registry.consume(card, "operation:owner", "receipt:other"), errorCode("OPERATION_CONFLICT"));
+    await waitForChildExit(child);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+    fs.rmSync(fixture.stateRoot, { recursive: true, force: true });
+  }
+});
+
+test("persistent kernel lock is released when a child exits without close", async () => {
+  const fixture = makeWorkspace();
+  const now = new Date("2026-09-05T00:00:00.000Z");
+  try {
+    const observation = observeWorkspace(fixture.root, fixture.stateRoot);
+    const registry = registryFor(observation.stateRoot, now);
+    const card = registry.issue(observation);
+    const lock = targetLockFile(observation, card.targetId);
+    const source = [
+      'import fs from "node:fs";',
+      "const file = process.argv[1];",
+      "fs.openSync(file, fs.constants.O_RDWR | 0x20 | 0x20000000);",
+      "process.stdout.write('locked\\n');",
+      "process.exit(0);",
+    ].join("\n");
+    const child = spawn(process.execPath, ["--input-type=module", "--eval", source, lock], { stdio: ["ignore", "pipe", "pipe"] });
+    await waitForChildOutput(child, "locked");
+    await waitForChildExit(child);
+    registry.reserve(card, "operation:owner", "a".repeat(64), now);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+    fs.rmSync(fixture.stateRoot, { recursive: true, force: true });
+  }
+});
+
+test("kernel no-follow-any rejects an ancestor swapped to a symlink immediately before target open", () => {
+  const fixture = makeWorkspace();
+  const now = new Date("2026-09-05T00:00:00.000Z");
+  const externalState = `${fixture.stateRoot}-external`;
+  try {
+    const observation = observeWorkspace(fixture.root, fixture.stateRoot);
+    const issuer = registryFor(observation.stateRoot, now);
+    const card = issuer.issue(observation);
+    let swapped = false;
+    const registry = new TargetRegistry({
+      stateRoot: observation.stateRoot,
+      clock: () => now,
+      onBeforeTargetOpen: () => {
+        if (swapped) return;
+        swapped = true;
+        fs.renameSync(observation.stateRoot, externalState);
+        fs.symlinkSync(externalState, observation.stateRoot);
+      },
+    });
+    assert.throws(() => registry.reserve(card, "operation:owner", "a".repeat(64), now), errorCode("OPERATION_IN_DOUBT"));
+  } finally {
+    try {
+      if (fs.lstatSync(fixture.stateRoot).isSymbolicLink()) fs.unlinkSync(fixture.stateRoot);
+    } catch {}
+    if (fs.existsSync(externalState)) fs.renameSync(externalState, fixture.stateRoot);
     fs.rmSync(fixture.root, { recursive: true, force: true });
     fs.rmSync(fixture.stateRoot, { recursive: true, force: true });
   }

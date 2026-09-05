@@ -12,9 +12,11 @@ import {
   writeSync,
 } from "node:fs";
 import path from "node:path";
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { BetaError, betaError } from "./errors.ts";
 import { parseStrictJsonBytes } from "./strict-json.ts";
+
+export const O_NOFOLLOW_ANY = 0x20000000;
 
 function isMissing(error: unknown): boolean {
   return !!error && typeof error === "object" && "code" in error && error.code === "ENOENT";
@@ -82,7 +84,7 @@ function assertRegularFile(file: string): void {
   assertMode(entry.mode, 0o600, "Private state file");
 }
 
-function fsyncDirectory(directory: string): void {
+export function syncPrivateDirectory(directory: string): void {
   let descriptor = -1;
   try {
     descriptor = openSync(directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
@@ -119,7 +121,7 @@ function writeExclusive(file: string, bytes: Uint8Array): void {
   } finally {
     if (descriptor >= 0) closeSync(descriptor);
   }
-  fsyncDirectory(directory);
+  syncPrivateDirectory(directory);
 }
 
 export function ensurePrivateDirectory(directory: string): void {
@@ -162,7 +164,7 @@ export function writeJsonAtomic(file: string, value: unknown): void {
   try {
     writeExclusive(temporary, Buffer.from(JSON.stringify(value), "utf8"));
     renameSync(temporary, file);
-    fsyncDirectory(directory);
+    syncPrivateDirectory(directory);
   } catch (error) {
     try {
       unlinkSync(temporary);
@@ -189,7 +191,7 @@ function readPrivateBytes(file: string): { bytes: Buffer; dev: number; ino: numb
   assertRegularFile(file);
   let descriptor = -1;
   try {
-    descriptor = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+    descriptor = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW | O_NOFOLLOW_ANY);
     const initial = fstatSync(descriptor);
     if (!initial.isFile() || !Number.isSafeInteger(initial.size) || initial.size < 0 || initial.size > 64 * 1024) {
       throw betaError("OPERATION_IN_DOUBT", "Private state file is not a supported regular file.");
@@ -212,32 +214,4 @@ function readPrivateBytes(file: string): { bytes: Buffer; dev: number; ino: numb
   } finally {
     if (descriptor >= 0) closeSync(descriptor);
   }
-}
-
-export interface PrivateLock {
-  release(): void;
-}
-
-export function acquirePrivateLock(file: string, owner: Uint8Array): PrivateLock {
-  if (owner.byteLength === 0) throw betaError("OPERATION_IN_DOUBT", "Private lock ownership bytes are required.");
-  writeExclusive(file, owner);
-  return {
-    release() {
-      const captured = readPrivateBytes(file);
-      if (captured.bytes.byteLength !== owner.byteLength || !timingSafeEqual(captured.bytes, owner)) {
-        throw betaError("OPERATION_IN_DOUBT", "Private lock ownership changed before release.");
-      }
-      const current = lstatSync(file);
-      if (current.isSymbolicLink() || !current.isFile() || current.dev !== captured.dev || current.ino !== captured.ino) {
-        throw betaError("OPERATION_IN_DOUBT", "Private lock changed before release.");
-      }
-      try {
-        unlinkSync(file);
-        fsyncDirectory(path.dirname(file));
-      } catch (error) {
-        if (error instanceof BetaError) throw error;
-        throw betaError("OPERATION_IN_DOUBT", "Unable to release the private lock.");
-      }
-    },
-  };
 }
