@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { CliUsageError, parseCliArgs, resolveStateRoot } from "./args.ts";
 import { canonicalJson } from "./canonical.ts";
 import { PRODUCT_NAME, PRODUCT_VERSION, runDoctor } from "./doctor.ts";
+import { runDemo } from "./demo.ts";
 import { BetaError, betaError } from "./errors.ts";
 import { createLocalKernelPort } from "./kernel-port.ts";
 import { OperationJournal } from "./operation-journal.ts";
@@ -76,7 +77,10 @@ export async function runCli(argv: readonly string[], cwd: string, io: CliIO): P
       if (result.exitCode !== 0) throw betaError(result.code as "UNSUPPORTED_ENVIRONMENT" | "OPERATION_IN_DOUBT", result.code === "OPERATION_IN_DOUBT" ? "Writer evidence requires inspection." : "The supported environment checks did not pass.");
       io.stdout(display(result)); return 0;
     }
-    if (invocation.kind === "demo") throw betaError("CAPABILITY_UNAVAILABLE", "The repo-local demo is not available yet.");
+    if (invocation.kind === "demo") {
+      await runDemo({ ...(invocation.stateRoot === null ? {} : { stateRoot: path.resolve(cwd, invocation.stateRoot) }), output: text => io.stdout(text) });
+      return 0;
+    }
     const observed = workspace(cwd, invocation.stateRoot);
     if (invocation.kind === "host-init") {
       hostInit(observed, cwd, invocation.out);

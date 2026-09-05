@@ -24,7 +24,10 @@
     "test": "node --experimental-strip-types --test test/*.test.ts",
     "demo": "node --experimental-strip-types examples/cloud-local-relay.ts",
     "proof": "node --experimental-strip-types examples/verified-resume-proof.ts",
-    "check": "npm test && npm run demo && npm run proof"
+    "beta:test": "node --experimental-strip-types --test packages/trajecta-beta/test/*.test.ts test/beta-parent-contract.test.ts test/store-recovery.test.ts",
+    "beta:demo": "packages/trajecta-beta/bin/trajecta-beta demo",
+    "beta:check": "npm run beta:test && npm run beta:demo",
+    "check": "npm test && npm run demo && npm run proof && npm run beta:check"
   },
   "engines": {
     "node": ">=22.19"

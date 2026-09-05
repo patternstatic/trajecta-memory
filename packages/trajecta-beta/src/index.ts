@@ -14,3 +14,4 @@ export * from "./resume-service.ts";
 export * from "./args.ts";
 export * from "./doctor.ts";
 export { runCli, type CliIO } from "./cli.ts";
+export { runDemo, type DemoOptions, type DemoResult } from "./demo.ts";

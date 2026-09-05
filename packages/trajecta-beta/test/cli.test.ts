@@ -199,7 +199,6 @@ test("unknown commands, flags and missing values have bounded two-line errors", 
   for (const args of [[], ["unknown"], ["codex", "pair"], ["version", "--accept"], ["resume"], ["host", "init", "--out"], ["doctor", "--state-root", "../unsafe"], ["resume", "x", "--accept", "--accept"]]) {
     failure(run(root, ...args), "USAGE");
   }
-  failure(run(root, "demo"), "CAPABILITY_UNAVAILABLE");
   const before = tree(root); failure(run(root, "receipt", "operation:absent"), "OPERATION_IN_DOUBT");
   assert.deepEqual(tree(root), before);
 });
