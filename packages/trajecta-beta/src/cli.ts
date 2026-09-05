@@ -12,7 +12,7 @@ import { OperationJournal } from "./operation-journal.ts";
 import { ReceiptStore } from "./receipt-store.ts";
 import { LocalResumeService } from "./resume-service.ts";
 import { TargetRegistry } from "./target-registry.ts";
-import { observeWorkspace, type WorkspaceObservation } from "./workspace.ts";
+import { gitEnvironment, observeWorkspace, type WorkspaceObservation } from "./workspace.ts";
 
 export interface CliIO { stdout(bytes: string | Uint8Array): void; stderr(text: string): void }
 
@@ -27,7 +27,7 @@ function display(value: unknown): string {
 function workspace(cwd: string, configured: string | null): WorkspaceObservation {
   let root: string;
   try {
-    root = realpathSync(execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim());
+    root = realpathSync(execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd, env: gitEnvironment(), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim());
   } catch { throw betaError("CAPABILITY_UNAVAILABLE", "An exact attached Git workspace is required."); }
   return observeWorkspace(cwd, resolveStateRoot(cwd, root, configured));
 }

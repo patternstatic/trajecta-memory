@@ -12,7 +12,7 @@ import { OperationJournal } from "./operation-journal.ts";
 import { ReceiptStore } from "./receipt-store.ts";
 import { LocalResumeService } from "./resume-service.ts";
 import { TargetRegistry } from "./target-registry.ts";
-import { observeWorkspace } from "./workspace.ts";
+import { gitEnvironment, observeWorkspace } from "./workspace.ts";
 import { withWriterLock } from "./writer-lock.ts";
 
 export interface DemoOptions {
@@ -56,8 +56,8 @@ export async function runDemo(options: DemoOptions = {}): Promise<DemoResult> {
   try {
     const cwd = path.join(temporary, "workspace"); mkdirSync(cwd, { mode: 0o700 });
     const stateRoot = prepareStateRoot(options.stateRoot ?? path.join(temporary, "state"));
-    execFileSync("git", ["init", "-b", "main", cwd], { stdio: "ignore" });
-    execFileSync("git", ["-C", cwd, "remote", "add", "origin", "https://example.invalid/patternstatic/trajecta-memory.git"], { stdio: "ignore" });
+    execFileSync("git", ["init", "-b", "main", cwd], { env: gitEnvironment(), stdio: "ignore" });
+    execFileSync("git", ["-C", cwd, "remote", "add", "origin", "https://example.invalid/patternstatic/trajecta-memory.git"], { env: gitEnvironment(), stdio: "ignore" });
     let instant = (options.clock ?? (() => new Date()))().getTime();
     requireProof(Number.isFinite(instant));
     const clock = () => new Date(instant);

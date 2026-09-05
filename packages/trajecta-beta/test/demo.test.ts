@@ -124,3 +124,58 @@ test("demo rejects supplied symlink roots and absent parents without outside mut
   await assert.rejects(sdk.runDemo({ stateRoot: path.join(root, "absent", "state") }), (error: any) => error.code === "OPERATION_IN_DOUBT");
   assert.equal(fs.existsSync(path.join(root, "absent")), false);
 });
+
+function poisonedGitFixture(t: test.TestContext) {
+  const root = temporary(t), external = path.join(root, "external"), cwd = path.join(root, "workspace"), temp = path.join(root, "temporary");
+  const base = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")));
+  fs.mkdirSync(temp);
+  for (const [directory, branch, remote] of [[external, "external-branch", "https://example.invalid/external/sentinel.git"], [cwd, "main", "https://example.invalid/expected/workspace.git"]]) {
+    fs.mkdirSync(directory!);
+    execFileSync("git", ["init", "-b", branch!, directory!], { env: base, stdio: "ignore" });
+    execFileSync("git", ["-C", directory!, "remote", "add", "origin", remote!], { env: base, stdio: "ignore" });
+    fs.writeFileSync(path.join(directory!, "sentinel.txt"), "Sentinel object and index must remain unchanged");
+    execFileSync("git", ["-C", directory!, "add", "sentinel.txt"], { env: base, stdio: "ignore" });
+  }
+  const env = { ...base, TMPDIR: temp, NODE_OPTIONS: "", GIT_DIR: path.join(external, ".git"), GIT_WORK_TREE: external,
+    GIT_INDEX_FILE: path.join(external, ".git/index"), GIT_OBJECT_DIRECTORY: path.join(external, ".git/objects"),
+    GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "remote.origin.url", GIT_CONFIG_VALUE_0: "https://user:SECRET_TOKEN@example.invalid/redirected/repo.git" };
+  return { root, external, cwd, temp, env };
+}
+
+test("Git environment boundary removes every GIT_ override without changing other environment", () => {
+  assert.equal(typeof sdk.gitEnvironment, "function");
+  const supplied = { HOME: "/preserved/home", PATH: "/preserved/bin", LANG: "C", EMPTY: undefined, GITHUB_TOKEN: "unchanged",
+    GIT_DIR: "external", GIT_WORK_TREE: "external", GIT_INDEX_FILE: "index", GIT_OBJECT_DIRECTORY: "objects", GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "remote.origin.url", GIT_CONFIG_VALUE_0: "redirect", GIT_CONFIG_PARAMETERS: "override", GIT_FUTURE_OVERRIDE: "remove" };
+  const before = { ...supplied };
+  assert.deepEqual(sdk.gitEnvironment(supplied), { HOME: "/preserved/home", PATH: "/preserved/bin", LANG: "C", EMPTY: undefined, GITHUB_TOKEN: "unchanged" });
+  assert.deepEqual(supplied, before);
+});
+
+test("direct demo ignores poisoned Git routing/config and leaves external repo bytes unchanged", t => {
+  const f = poisonedGitFixture(t), beforeExternal = files(f.external), beforeWorkspace = files(f.cwd), stateRoot = path.join(f.root, "state");
+  const result = spawnSync(path.join(repo, "packages/trajecta-beta/bin/trajecta-beta"), ["demo", "--state-root", stateRoot],
+    { cwd: f.cwd, encoding: "utf8", env: f.env });
+  assert.equal(result.status, 0, result.stderr); assert.equal(result.stderr, ""); assert.equal(normalize(result.stdout), expectedTrace); safe(result.stdout);
+  assert.deepEqual(files(f.external), beforeExternal); assert.deepEqual(files(f.cwd), beforeWorkspace); assert.deepEqual(fs.readdirSync(f.temp), []);
+  const receipts = fs.readdirSync(path.join(stateRoot, "receipts")).map(name => JSON.parse(fs.readFileSync(path.join(stateRoot, "receipts", name), "utf8")));
+  assert.equal(receipts.length, 2); assert.equal(receipts.filter(receipt => receipt.code === "RESUMED").length, 1);
+});
+
+for (const command of ["doctor", "host init"]) test(`${command} binds cwd rather than inherited external Git overrides`, t => {
+  const f = poisonedGitFixture(t), beforeExternal = files(f.external), beforeWorkspace = files(f.cwd);
+  const executable = path.join(repo, "packages/trajecta-beta/bin/trajecta-beta");
+  if (command === "doctor") {
+    const doctor = spawnSync(executable, ["doctor"], { cwd: f.cwd, encoding: "utf8", env: f.env });
+    assert.equal(doctor.status, 0, doctor.stderr); assert.equal(doctor.stderr, ""); safe(doctor.stdout);
+    const diagnosis = JSON.parse(doctor.stdout); assert.equal(diagnosis.repository, "example.invalid/expected/workspace"); assert.equal(diagnosis.branch, "main");
+    assert.deepEqual(files(f.external), beforeExternal); assert.deepEqual(files(f.cwd), beforeWorkspace); return;
+  }
+  const initialized = spawnSync(executable, ["host", "init"], { cwd: f.cwd, encoding: "utf8", env: f.env });
+  assert.equal(initialized.status, 0, initialized.stderr); assert.equal(initialized.stderr, ""); safe(initialized.stdout);
+  const target = JSON.parse(fs.readFileSync(path.join(f.cwd, "trajecta-target.traj.json"), "utf8"));
+  assert.equal(target.workspace.repository, "example.invalid/expected/workspace"); assert.equal(target.workspace.branch, "main");
+  assert.ok(fs.existsSync(path.join(f.cwd, ".trajecta-beta/targets")));
+  assert.equal(target.workspace.stateRootFingerprint, createHash("sha256").update(path.join(f.cwd, ".trajecta-beta")).digest("hex"));
+  assert.deepEqual(files(f.external), beforeExternal); assert.deepEqual(fs.readdirSync(f.temp), []);
+});

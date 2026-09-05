@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { resolveStateRoot } from "./args.ts";
 import { inspectWriterLock } from "./writer-lock.ts";
-import { observeWorkspace } from "./workspace.ts";
+import { gitEnvironment, observeWorkspace } from "./workspace.ts";
 
 export const PRODUCT_NAME = "Trajecta Verified Resume SDK Beta";
 export const PRODUCT_VERSION = "0.1.0";
@@ -44,7 +44,7 @@ function nodeSupported(value: string): boolean {
 
 function gitTopLevel(cwd: string): string | null {
   try {
-    const root = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const root = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd, env: gitEnvironment(), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
     return root ? realpathSync(root) : null;
   } catch { return null; }
 }

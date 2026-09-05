@@ -17,13 +17,18 @@ export function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
+/** Git identity comes from fixed argv and cwd, never inherited Git overrides. */
+export function gitEnvironment(environment: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(environment).filter(([key]) => !key.startsWith("GIT_")));
+}
+
 function unavailable(message: string): never {
   throw betaError("CAPABILITY_UNAVAILABLE", message);
 }
 
 function requiredGit(cwd: string, args: readonly string[]): string {
   try {
-    const value = execFileSync("git", [...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const value = execFileSync("git", [...args], { cwd, env: gitEnvironment(), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
     if (!value) unavailable("The local workspace does not provide the required Git identity.");
     return value;
   } catch (error) {
