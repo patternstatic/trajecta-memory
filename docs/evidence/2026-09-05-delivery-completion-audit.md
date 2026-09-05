@@ -1,5 +1,34 @@
 # Private delivery completion audit
 
+## Latest frozen candidate — 08:30 UTC
+
+- Reviewed implementation: `5adbfd697fdd1ae146adafb29cad5039797dd00a`.
+  Scoped independent rereview approved both final onboarding fixes; no remaining
+  Critical/Important finding in that wave. Report: SDD `final-rereview.md`.
+- Replacement archive: Downloads `trajecta-customer0-20260905-0830/trajecta-verified-resume-sdk-beta-0.1.0.zip`.
+  SHA-256 `08c8f5e786d8cc184418603ab345c01c1a4d6b3880b5a6577b642ad10e220635`.
+- Independent evaluation key fingerprint:
+  `eab52d34e247dd0f2b0b0972bab6368d52cc372321828859f39e51533f685c1b`.
+- Seller build and authenticated extraction exited 0. The actual extracted tree
+  was installed with the shipped `--prefix .` command in a new empty directory
+  outside the repository. Installed acceptance exited 0 without repairing modes.
+- Evidence: same candidate directory, `parent-evidence/evidence.json`, SHA-256
+  `0cbe2ffe6a7691bd6838a414f69a83646ac83a7533e2b9e03ae8e567b6a653cd`.
+  Original and installed archive audits match; install exit 0; inspect/stale
+  before-after digests match; target changes issued to consumed; final revision
+  4; retry and lookup exact; competing operation refused. Expiry is explicitly
+  clock-controlled, not a 30-minute real-time durability claim.
+- Fresh independent operator for these replacement bytes is running. Earlier
+  candidate/operator results do not substitute for that result.
+- Preserve failed candidate `ce557558...` and its diagnostic evidence unchanged.
+  The earlier unintended home npm modification remains disclosed and unrolled
+  back because its prior baseline is unknown.
+- This is still evaluation-only, not-for-sale. Private remote integration and
+  commercial terms/activation approval remain open. No remote mutation occurred.
+
+The historical table below is retained as the earlier audit baseline; the dated
+candidate evidence above supersedes its implementation-progress entries only.
+
 This is an evidence index, not a completion certificate. The binding target is
 the approved private-delivery spec, especially sections 13–15. Evaluation and
 commercial activation are separate. Refresh this audit against final bytes.
