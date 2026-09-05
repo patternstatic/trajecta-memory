@@ -15,6 +15,7 @@ export const RECEIPT_TEST_SCOPE_IDS = [
   "release-reproducibility-v1",
 ] as const;
 export const RECEIPT_LIMITATIONS = ["Customer-0-not-run", "not-for-sale", "no-commercial-activation"] as const;
+export const COMMERCIAL_CANDIDATE_LIMITATIONS = Object.freeze(["Customer-0-not-run", "commercial-activation-pending", "no-remote-task-completion-claim"] as const);
 const RECEIPT_PRODUCT = "Trajecta Verified Resume SDK Beta";
 const RECEIPT_VERSION = "0.1.0";
 const RECEIPT_ENVIRONMENT = {
@@ -160,6 +161,22 @@ export function parseEvaluationReceipt(value: unknown): void {
   const scopes = stringArray(receipt.testScopeIds, "receipt testScopeIds");
   const limitations = stringArray(receipt.limitations, "receipt limitations");
   if (scopes.length !== RECEIPT_TEST_SCOPE_IDS.length || scopes.some((scope, index) => scope !== RECEIPT_TEST_SCOPE_IDS[index]) || limitations.length !== RECEIPT_LIMITATIONS.length || limitations.some((limitation, index) => limitation !== RECEIPT_LIMITATIONS[index])) releaseError("INVALID_RECEIPT", "Receipt claims must exactly match the fixed evaluation scope.");
+}
+
+export function parseCommercialCandidateReceipt(value: unknown): void {
+  const receipt = record(value, "receipt");
+  if (receipt.schema !== "trajecta.release-integrity-commercial-candidate/v1") releaseError("INVALID_RECEIPT", "Commercial candidate receipt schema is invalid.");
+  const limitations = stringArray(receipt.limitations, "receipt limitations");
+  if (limitations.length !== COMMERCIAL_CANDIDATE_LIMITATIONS.length || limitations.some((limitation, index) => limitation !== COMMERCIAL_CANDIDATE_LIMITATIONS[index])) releaseError("INVALID_RECEIPT", "Receipt claims must exactly match the fixed commercial candidate scope.");
+  parseEvaluationReceipt({ ...receipt, schema: "trajecta.release-integrity-evaluation/v1", limitations: RECEIPT_LIMITATIONS });
+}
+
+export function parseReleaseReceipt(value: unknown): void {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return releaseError("INVALID_RECEIPT", "Release receipt schema is invalid.");
+  const schema = (value as Record<string, unknown>).schema;
+  if (schema === "trajecta.release-integrity-evaluation/v1") return parseEvaluationReceipt(value);
+  if (schema === "trajecta.release-integrity-commercial-candidate/v1") return parseCommercialCandidateReceipt(value);
+  return releaseError("INVALID_RECEIPT", "Release receipt schema is invalid.");
 }
 
 export function parseReleasePins(value: unknown): void {

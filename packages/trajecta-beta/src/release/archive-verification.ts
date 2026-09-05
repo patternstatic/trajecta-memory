@@ -5,7 +5,7 @@ import { canonicalJsonLf, sha256Hex } from "./canonical.ts";
 import { PACKAGE_PATH, parseManifest, parseSha256 } from "./contracts.ts";
 import { MAX_CANONICAL_ZIP_BYTES, readZip, readZipReleaseInstant, type ZipMember } from "./deterministic-zip.ts";
 import { ReleaseIntegrityError, releaseError } from "./errors.ts";
-import { MAX_PUBLIC_KEY_BYTES, publicKeyFingerprint, verifySignedReceipt, type EvaluationReceipt } from "./signature-verification.ts";
+import { MAX_PUBLIC_KEY_BYTES, publicKeyFingerprint, verifySignedReceipt, type ReleaseReceipt } from "./signature-verification.ts";
 import { auditTgz, type TarLedgerMember } from "./tar-reader.ts";
 
 export const BUNDLE_ROOT = "trajecta-verified-resume-sdk-beta-0.1.0";
@@ -46,7 +46,7 @@ interface ManifestMember {
 interface VerifiedArchive {
   files: ReadonlyMap<string, Buffer>;
   modes: ReadonlyMap<string, "0644" | "0755">;
-  receipt: EvaluationReceipt;
+  receipt: ReleaseReceipt;
   installedMembers: ReadonlyMap<string, Buffer>;
   installedLedger: readonly TarLedgerMember[];
 }
