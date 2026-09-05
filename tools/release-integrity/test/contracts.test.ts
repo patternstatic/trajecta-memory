@@ -18,6 +18,20 @@ import { canonicalJsonLf, sha256Hex } from "../src/canonical.ts";
 
 const receipt = {
   schema: "trajecta.release-integrity-evaluation/v1",
+  product: "Trajecta Verified Resume SDK Beta",
+  version: "0.1.0",
+  buildCommit: "a".repeat(40),
+  manifestSha256: "b".repeat(64),
+  supportedEnvironment: {
+    platform: "macOS",
+    architecture: "Apple Silicon",
+    node: ">=22.19 <23",
+    workspace: "one local workspace and one active Trajecta writer",
+    transport: "user-controlled JSON file",
+    outputLanguage: "English",
+  },
+  releaseInstant: "2026-09-05T00:00:00Z",
+  verificationInstant: "2026-09-05T00:00:01Z",
   testScopeIds: [
     "release-contracts-v1",
     "release-source-preflight-v1",
@@ -29,6 +43,9 @@ const receipt = {
   ],
   highestProvenReceiptLevel: "production-local-sdk",
   limitations: ["Customer-0-not-run", "not-for-sale", "no-commercial-activation"],
+  supportDefinition: "30 calendar days of bug-fix builds from purchase and one email thread for installation clarification",
+  keyId: "ed25519:fixture",
+  publicKeyFingerprint: "c".repeat(64),
 };
 
 test("canonical bytes are sorted UTF-8 JSON with one LF and stable SHA-256", () => {
@@ -67,7 +84,7 @@ test("verification instant is separately frozen UTC receipt data", () => {
   }
 });
 
-test("manifest permits mixed-container only for the package and receipt has only fixed evaluation claims", () => {
+test("manifest is lexically unique, keeps one package-only mixed container, and receipt has only fixed evaluation claims", () => {
   // Would fail if mixed license evidence escaped the package container or a receipt claimed unproven outcomes.
   const packageLedger = [{ path: "beta/src/cli.ts", bytes: 1, sha256: "b".repeat(64), mode: "0644", originalClass: "commercial-beta" }];
   assert.doesNotThrow(() => parseManifest({
@@ -79,11 +96,30 @@ test("manifest permits mixed-container only for the package and receipt has only
   }));
   assert.throws(() => parseManifest({ schema: "trajecta.release-manifest/v1", members: [{ path: "LICENSE", bytes: 1, sha256: "a".repeat(64), originalClass: "mixed-container", memberLedger: packageLedger }] }));
   assert.throws(() => parseManifest({ schema: "trajecta.release-manifest/v1", members: [{ path: "packages/trajecta-beta-0.1.0.tgz", bytes: 2, sha256: "c".repeat(64), originalClass: "mixed-container", memberLedger: [{ ...packageLedger[0], originalClass: "mixed-container" }] }] }));
+  assert.throws(() => parseManifest({ schema: "trajecta.release-manifest/v1", members: [
+    { path: "packages/trajecta-beta-0.1.0.tgz", bytes: 2, sha256: "c".repeat(64), originalClass: "mixed-container", memberLedger: packageLedger },
+    { path: "LICENSE", bytes: 1, sha256: "a".repeat(64), originalClass: "notice" },
+  ] }));
+  assert.throws(() => parseManifest({ schema: "trajecta.release-manifest/v1", members: [
+    { path: "LICENSE", bytes: 1, sha256: "a".repeat(64), originalClass: "notice" },
+    { path: "LICENSE", bytes: 1, sha256: "a".repeat(64), originalClass: "notice" },
+    { path: "packages/trajecta-beta-0.1.0.tgz", bytes: 2, sha256: "c".repeat(64), originalClass: "mixed-container", memberLedger: packageLedger },
+  ] }));
+  assert.throws(() => parseManifest({ schema: "trajecta.release-manifest/v1", members: [
+    { path: "MANIFEST.json", bytes: 1, sha256: "a".repeat(64), originalClass: "notice" },
+    { path: "packages/trajecta-beta-0.1.0.tgz", bytes: 2, sha256: "c".repeat(64), originalClass: "mixed-container", memberLedger: packageLedger },
+  ] }));
+  assert.throws(() => parseManifest({ schema: "trajecta.release-manifest/v1", members: [
+    { path: "LICENSE", bytes: 1, sha256: "a".repeat(64), originalClass: "notice" },
+    { path: "packages/trajecta-beta-0.1.0.tgz", bytes: 2, sha256: "c".repeat(64), originalClass: "mixed-container", memberLedger: [{ path: "z.ts", bytes: 1, sha256: "b".repeat(64), mode: "0644", originalClass: "commercial-beta" }, { path: "a.ts", bytes: 1, sha256: "b".repeat(64), mode: "0644", originalClass: "commercial-beta" }] },
+  ] }));
   assert.doesNotThrow(() => parseEvaluationReceipt(receipt));
   assert.throws(() => parseEvaluationReceipt({ ...receipt, status: "passed" }));
   assert.throws(() => parseEvaluationReceipt({ ...receipt, testScopeIds: receipt.testScopeIds.slice(0, -1) }));
   assert.throws(() => parseEvaluationReceipt({ ...receipt, highestProvenReceiptLevel: "release-integrity" }));
   assert.throws(() => parseEvaluationReceipt({ ...receipt, limitations: [...receipt.limitations, "installed"] }));
+  assert.throws(() => parseEvaluationReceipt({ ...receipt, supportedEnvironment: { ...receipt.supportedEnvironment, platform: "Linux" } }));
+  assert.throws(() => parseEvaluationReceipt({ ...receipt, supportDefinition: "support forever" }));
   assert.doesNotThrow(() => parseReleasePins({ schema: "trajecta.release-pins/v1", archiveSha256: "d".repeat(64), keyFingerprint: "e".repeat(64), archiveAudit: "passed", reproducibility: "passed" }));
 });
 

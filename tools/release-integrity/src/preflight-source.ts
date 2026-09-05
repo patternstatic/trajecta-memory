@@ -34,6 +34,12 @@ export interface PreflightOptions {
   beforeCopy?: () => void;
 }
 
+interface GitContext {
+  sourceRoot: string;
+  gitDir: string;
+  environment: NodeJS.ProcessEnv;
+}
+
 function assertGitBin(gitBin: string): string {
   if (!path.isAbsolute(gitBin)) return releaseError("INVALID_GIT_BIN", "--git-bin must be absolute.");
   let stat: fs.Stats;
@@ -58,9 +64,17 @@ function gitEnvironment(): { environment: NodeJS.ProcessEnv; cleanup: () => void
   return { environment, cleanup: () => fs.rmSync(path.dirname(emptyGlobalConfig), { recursive: true, force: true, maxRetries: 2 }) };
 }
 
-function runGit(gitBin: string, sourceRoot: string, environment: NodeJS.ProcessEnv, args: string[]): Buffer {
+function resolveGitDirectory(sourceRoot: string): string {
+  const candidate = path.join(sourceRoot, ".git");
+  let stat: fs.Stats;
+  try { stat = fs.lstatSync(candidate); } catch { return releaseError("INVALID_GIT_DIR", "Source root must contain a regular .git directory."); }
+  if (!stat.isDirectory() || stat.isSymbolicLink()) return releaseError("INVALID_GIT_DIR", "Source root must contain a no-follow .git directory.");
+  return candidate;
+}
+
+function runGit(gitBin: string, context: GitContext, args: string[]): Buffer {
   try {
-    return execFileSync(gitBin, args, { cwd: sourceRoot, env: environment, encoding: "buffer", stdio: ["ignore", "pipe", "pipe"] });
+    return execFileSync(gitBin, ["--no-replace-objects", `--git-dir=${context.gitDir}`, `--work-tree=${context.sourceRoot}`, ...args], { cwd: context.sourceRoot, env: context.environment, encoding: "buffer", stdio: ["ignore", "pipe", "pipe"] });
   } catch {
     return releaseError("GIT_PREFLIGHT_FAILED", "Git preflight rejected the source inputs.");
   }
@@ -77,9 +91,11 @@ function nulList(bytes: Buffer): string[] {
 }
 
 function rootForPattern(pattern: string): string {
+  if (!/[?*[]/.test(pattern)) return pattern;
   const prefix = pattern.slice(0, pattern.search(/[?*[]/));
   const root = prefix.endsWith("/") ? prefix.slice(0, -1) : path.posix.dirname(prefix);
-  return root === "." ? "." : root;
+  if (root === ".") return releaseError("INVALID_POLICY", "Policy patterns must have a literal path root.");
+  return root;
 }
 
 function globPattern(pattern: string): RegExp {
@@ -98,17 +114,35 @@ function globPattern(pattern: string): RegExp {
   return new RegExp(`${expression}$`);
 }
 
-function expandCommitAllowlist(gitBin: string, sourceRoot: string, environment: NodeJS.ProcessEnv, buildCommit: string, sourceRoots: string[]): string[] {
+function expandCommitAllowlist(gitBin: string, context: GitContext, buildCommit: string, sourceRoots: string[]): string[] {
   // Keep the policy roots visible in the authoritative Git invocation, then expand recursive patterns only from that commit tree.
-  const direct = nulList(runGit(gitBin, sourceRoot, environment, ["ls-tree", "-r", "-z", "--name-only", buildCommit, "--", ...sourceRoots]));
-  if (!sourceRoots.some((root) => /[?*[]/.test(root))) return direct;
+  const direct = nulList(runGit(gitBin, context, ["ls-tree", "-r", "-z", "--name-only", buildCommit, "--", ...sourceRoots]));
+  if (!sourceRoots.some((root) => /[?*[]/.test(root))) {
+    for (const sourceRoot of sourceRoots) if (!direct.some((entry) => entry === sourceRoot || entry.startsWith(`${sourceRoot}/`))) releaseError("POLICY_INPUT_MISSING", "Every policy source root must match the build commit.");
+    return direct;
+  }
   const roots = [...new Set(sourceRoots.map(rootForPattern))];
-  const candidates = nulList(runGit(gitBin, sourceRoot, environment, ["ls-tree", "-r", "-z", "--name-only", buildCommit, "--", ...roots]));
-  const patterns = sourceRoots.map(globPattern);
-  return [...new Set([...direct, ...candidates.filter((candidate) => patterns.some((pattern) => pattern.test(candidate)))])].sort();
+  const candidates = nulList(runGit(gitBin, context, ["ls-tree", "-r", "-z", "--name-only", buildCommit, "--", ...roots]));
+  const expanded = sourceRoots.map((sourceRoot) => {
+    const matches = /[?*[]/.test(sourceRoot) ? candidates.filter((candidate) => globPattern(sourceRoot).test(candidate)) : direct.filter((candidate) => candidate === sourceRoot || candidate.startsWith(`${sourceRoot}/`));
+    if (matches.length === 0) releaseError("POLICY_INPUT_MISSING", "Every policy source root must match the build commit.");
+    return matches;
+  });
+  return [...new Set(expanded.flat())].sort();
 }
 
-function copyNoFollow(source: string, destination: string, expected: fs.Stats): SnapshotEntry {
+function commitBlob(gitBin: string, context: GitContext, buildCommit: string, relative: string): Buffer {
+  return runGit(gitBin, context, ["cat-file", "blob", `${buildCommit}:${relative}`]);
+}
+
+function commitMode(gitBin: string, context: GitContext, buildCommit: string, relative: string): number {
+  const entry = nulList(runGit(gitBin, context, ["ls-tree", "-z", buildCommit, "--", relative]))[0];
+  const match = /^(\d+) blob [a-f0-9]+\t/.exec(entry ?? "");
+  if (!match) return releaseError("POLICY_INPUT_MISSING", "Commit-tree source metadata is missing.");
+  return Number.parseInt(match[1], 8) & 0o777;
+}
+
+function copyNoFollow(source: string, destination: string, expected: fs.Stats, blob: Buffer, mode: number): SnapshotEntry {
   const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0);
   let descriptor: number | undefined;
   try {
@@ -118,9 +152,9 @@ function copyNoFollow(source: string, destination: string, expected: fs.Stats): 
     const content = fs.readFileSync(descriptor);
     const after = fs.fstatSync(descriptor);
     if (after.dev !== expected.dev || after.ino !== expected.ino || after.size !== expected.size || after.mtimeMs !== expected.mtimeMs) releaseError("SOURCE_CHANGED", "A source input changed during snapshot.");
+    if (!content.equals(blob) || (actual.mode & 0o777) !== mode) releaseError("SOURCE_CHANGED", "Source bytes or mode do not match the build commit.");
     fs.mkdirSync(path.dirname(destination), { recursive: true, mode: 0o700 });
     fs.writeFileSync(destination, content, { mode: 0o400, flag: "wx" });
-    const mode = expected.mode & 0o777;
     return Object.freeze({ path: "", bytes: content.length, mode: mode.toString(8).padStart(4, "0"), sha256: sha256Hex(content) });
   } finally {
     if (descriptor !== undefined) fs.closeSync(descriptor);
@@ -139,15 +173,16 @@ export function preflightSource(options: PreflightOptions): SourceSnapshot {
   parseCommitDigest(options.buildCommit);
   const git = gitEnvironment();
   try {
-  const version = runGit(gitBin, sourceRoot, git.environment, ["--version"]).toString("utf8").trim();
+  const context: GitContext = { sourceRoot, gitDir: resolveGitDirectory(sourceRoot), environment: git.environment };
+  const version = runGit(gitBin, context, ["--version"]).toString("utf8").trim();
   if (!/^git version \d/.test(version)) return releaseError("INVALID_GIT_BIN", "--git-bin is not Git.");
-  const buildCommit = runGit(gitBin, sourceRoot, git.environment, ["rev-parse", "--verify", `${options.buildCommit}^{commit}`]).toString("utf8").trim();
-  const headCommit = runGit(gitBin, sourceRoot, git.environment, ["rev-parse", "--verify", "HEAD^{commit}"]).toString("utf8").trim();
+  const buildCommit = runGit(gitBin, context, ["rev-parse", "--verify", `${options.buildCommit}^{commit}`]).toString("utf8").trim();
+  const headCommit = runGit(gitBin, context, ["rev-parse", "--verify", "HEAD^{commit}"]).toString("utf8").trim();
   if (buildCommit !== options.buildCommit || headCommit !== buildCommit) return releaseError("BUILD_COMMIT_NOT_HEAD", "buildCommit must resolve exactly to HEAD.");
-  const inputs = expandCommitAllowlist(gitBin, sourceRoot, git.environment, buildCommit, options.policy.sourceRoots);
+  const inputs = expandCommitAllowlist(gitBin, context, buildCommit, options.policy.sourceRoots);
   if (inputs.length === 0) return releaseError("POLICY_INPUT_MISSING", "A policy source root has no member in the build commit.");
-  const scopedStatus = nulList(runGit(gitBin, sourceRoot, git.environment, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", ...inputs]));
-  const rootStatus = nulList(runGit(gitBin, sourceRoot, git.environment, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", ...[...new Set(options.policy.sourceRoots.map(rootForPattern))]]));
+  const scopedStatus = nulList(runGit(gitBin, context, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", ...inputs]));
+  const rootStatus = nulList(runGit(gitBin, context, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", ...[...new Set(options.policy.sourceRoots.map(rootForPattern))]]));
   if (scopedStatus.length > 0 || rootStatus.length > 0) return releaseError("DIRTY_SOURCE", "Allowlisted source inputs must be clean.");
   const folds = new Set<string>();
   for (const input of inputs) {
@@ -155,19 +190,19 @@ export function preflightSource(options: PreflightOptions): SourceSnapshot {
     if (folds.has(folded)) return releaseError("CASE_COLLISION", "Source inputs may not case-fold collide.");
     folds.add(folded);
   }
-  const observed: Array<{ relative: string; source: string; stat: fs.Stats }> = [];
+  const observed: Array<{ relative: string; source: string; stat: fs.Stats; blob: Buffer; mode: number }> = [];
   for (const relative of inputs) {
     const source = path.resolve(sourceRoot, relative);
     if (!source.startsWith(`${sourceRoot}${path.sep}`)) return releaseError("UNSAFE_SOURCE", "Commit-tree input escapes the source root.");
     let stat: fs.Stats;
     try { stat = fs.lstatSync(source); } catch { return releaseError("SOURCE_MISSING", "A commit-tree source input is absent."); }
     if (!stat.isFile() || stat.isSymbolicLink()) return releaseError("UNSAFE_SOURCE", "Source inputs must be regular files.");
-    observed.push({ relative, source, stat });
+    observed.push({ relative, source, stat, blob: commitBlob(gitBin, context, buildCommit, relative), mode: commitMode(gitBin, context, buildCommit, relative) });
   }
   const snapshotRoot = fs.mkdtempSync(path.join(os.tmpdir(), "trajecta-release-snapshot-"));
   try {
     options.beforeCopy?.();
-    const entries = observed.map(({ relative, source, stat }) => ({ ...copyNoFollow(source, path.join(snapshotRoot, relative), stat), path: relative }));
+    const entries = observed.map(({ relative, source, stat, blob, mode }) => ({ ...copyNoFollow(source, path.join(snapshotRoot, relative), stat, blob, mode), path: relative }));
     return freezeSnapshot(snapshotRoot, buildCommit, entries);
   } catch (error) {
     fs.rmSync(snapshotRoot, { recursive: true, force: true, maxRetries: 2 });

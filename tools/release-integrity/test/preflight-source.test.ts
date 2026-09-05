@@ -20,7 +20,8 @@ function fixture(): Fixture {
   fs.mkdirSync(path.join(root, "input", "nested"), { recursive: true });
   fs.writeFileSync(path.join(root, "input", "one.txt"), "one\n");
   fs.writeFileSync(path.join(root, "input", "nested", "two.txt"), "two\n");
-  command("git", ["add", "input"], root);
+  fs.writeFileSync(path.join(root, "LICENSE"), "fixture license\n");
+  command("git", ["add", "input", "LICENSE"], root);
   command("git", ["commit", "-m", "fixture"], root);
   return {
     root,
@@ -97,6 +98,11 @@ test("preflight rejects scoped staged, unstaged, untracked, deleted, symlinked, 
     assert.throws(() => preflightSource({ sourceRoot: missing.root, gitBin: gitBin(), buildCommit: missing.commit, policy: { ...missing.policy, sourceRoots: ["missing/**/*.ts"] } }));
     assertNoSnapshots(missing.root);
   } finally { fs.rmSync(missing.root, { recursive: true, force: true }); }
+  const mixed = fixture();
+  try {
+    assert.throws(() => preflightSource({ sourceRoot: mixed.root, gitBin: gitBin(), buildCommit: mixed.commit, policy: { ...mixed.policy, sourceRoots: ["input/**/*.txt", "missing/**/*.ts"] } }));
+    assertNoSnapshots(mixed.root);
+  } finally { fs.rmSync(mixed.root, { recursive: true, force: true }); }
 });
 
 test("preflight sanitizes Git configuration and detects a file changed while snapshotting", () => {
@@ -110,5 +116,35 @@ test("preflight sanitizes Git configuration and detects a file changed while sna
     });
     assert.throws(() => preflightSource({ sourceRoot: value.root, gitBin: gitBin(), buildCommit: value.commit, policy: value.policy, beforeCopy: () => fs.writeFileSync(path.join(value.root, "input", "one.txt"), "race\n") }));
     assertNoSnapshots(value.root);
+  } finally { fs.rmSync(value.root, { recursive: true, force: true }); }
+});
+
+test("preflight binds descriptors to build-commit blobs despite a malicious local core.worktree", () => {
+  // Would fail if local .git/config could point Git's cleanliness checks away from the bytes copied into a release snapshot.
+  const value = fixture();
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "trajecta-external-worktree-"));
+  try {
+    fs.mkdirSync(path.join(outside, "input", "nested"), { recursive: true });
+    fs.writeFileSync(path.join(outside, "input", "one.txt"), "one\n");
+    fs.writeFileSync(path.join(outside, "input", "nested", "two.txt"), "two\n");
+    command("git", ["config", "core.worktree", outside], value.root);
+    fs.writeFileSync(path.join(value.root, "input", "one.txt"), "malicious\n");
+    assert.throws(() => preflightSource({ sourceRoot: value.root, gitBin: gitBin(), buildCommit: value.commit, policy: value.policy }));
+    assertNoSnapshots(value.root);
+  } finally {
+    fs.rmSync(value.root, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test("literal policy roots do not widen status scanning to unrelated ignored-tool state", () => {
+  // Would fail if a literal root such as LICENSE were normalized to '.' and made unrelated .superpowers state block release inputs.
+  const value = fixture();
+  try {
+    fs.mkdirSync(path.join(value.root, ".superpowers"), { recursive: true });
+    fs.writeFileSync(path.join(value.root, ".superpowers", "local-note"), "ignored by policy\n");
+    const snapshot = preflightSource({ sourceRoot: value.root, gitBin: gitBin(), buildCommit: value.commit, policy: { ...value.policy, sourceRoots: ["LICENSE"] } });
+    assert.deepEqual(snapshot.entries.map((entry) => entry.path), ["LICENSE"]);
+    fs.rmSync(snapshot.root, { recursive: true, force: true });
   } finally { fs.rmSync(value.root, { recursive: true, force: true }); }
 });
