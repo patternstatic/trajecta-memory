@@ -34,13 +34,18 @@ internal tests or zero-value orders. This approval does not activate checkout.
 
 Ty decisions still needed before a commercial build:
 
+Support contact resolved after Ty explicitly directed use of Lam's email:
+`lam.thisside@gmail.com`, from the retained identity roster in
+`Lam-Continuity-Pack/memory/LTM-Lam.md` (Lam's separate email identity).
+This identifies the approved contact; it does not prove mailbox delivery,
+independent account control, or that support operations have been tested.
+
 1. Confirm final support wording at the approved USD 9 price. The original
    proposal was 30 calendar days of bug-fix builds and one installation support
    email thread; no hosted service or automatic account adapter. Price approval
    alone does not settle the final customer-facing terms.
-2. Supply the exact customer-facing seller/support contact and approve final
-   customer license/refund wording. No identity, address, or legal promise may
-   be invented from account ownership or persona.
+2. Approve final customer license/refund wording. Support email is resolved above;
+   legal seller identity and legal promises must not be inferred from persona.
 3. Separately authorize a non-revenue delivery test when checkout is ready.
    Technical approval is not permission for payments or public promotion.
 
