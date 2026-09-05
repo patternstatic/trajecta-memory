@@ -6,3 +6,6 @@ export * from "./envelope.ts";
 export * from "./durable-file.ts";
 export * from "./workspace.ts";
 export * from "./target-registry.ts";
+export { withWriterLock, type WriterLease, type WriterLockOptions } from "./writer-lock.ts";
+export { OperationJournal, type OperationIdentity, type OperationUpdate } from "./operation-journal.ts";
+export { ReceiptStore } from "./receipt-store.ts";

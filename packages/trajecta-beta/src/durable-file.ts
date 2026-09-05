@@ -187,12 +187,15 @@ export function readJsonFile(file: string): unknown {
   }
 }
 
-function readPrivateBytes(file: string): { bytes: Buffer; dev: number; ino: number } {
+export function readPrivateBytes(file: string): { bytes: Buffer; dev: number; ino: number } {
   assertRegularFile(file);
   let descriptor = -1;
   try {
-    descriptor = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW | O_NOFOLLOW_ANY);
+    // On macOS O_NOFOLLOW_ANY already includes the final component, and combining
+    // it with O_NOFOLLOW returns EINVAL even for a regular existing file.
+    descriptor = openSync(file, constants.O_RDONLY | O_NOFOLLOW_ANY);
     const initial = fstatSync(descriptor);
+    assertMode(initial.mode, 0o600, "Private state file");
     if (!initial.isFile() || !Number.isSafeInteger(initial.size) || initial.size < 0 || initial.size > 64 * 1024) {
       throw betaError("OPERATION_IN_DOUBT", "Private state file is not a supported regular file.");
     }
@@ -204,7 +207,7 @@ function readPrivateBytes(file: string): { bytes: Buffer; dev: number; ino: numb
       offset += read;
     }
     const final = fstatSync(descriptor);
-    if (final.size !== initial.size || final.dev !== initial.dev || final.ino !== initial.ino) {
+    if (final.size !== initial.size || final.dev !== initial.dev || final.ino !== initial.ino || final.mode !== initial.mode || final.mtimeMs !== initial.mtimeMs || final.ctimeMs !== initial.ctimeMs) {
       throw betaError("OPERATION_IN_DOUBT", "Private state file changed during read.");
     }
     return { bytes, dev: final.dev, ino: final.ino };
@@ -214,4 +217,21 @@ function readPrivateBytes(file: string): { bytes: Buffer; dev: number; ino: numb
   } finally {
     if (descriptor >= 0) closeSync(descriptor);
   }
+}
+
+/** Absence is distinct from unreadable, insecure, symlinked, or malformed state. */
+export function readOptionalPrivateBytes(file: string): Buffer | null {
+  assertPrivatePath(path.dirname(file));
+  try {
+    lstatSync(path.dirname(file));
+  } catch (error) {
+    if (isMissing(error)) return null;
+    throw betaError("OPERATION_IN_DOUBT", "Unable to inspect private state.");
+  }
+  assertPrivateDirectory(path.dirname(file));
+  try { lstatSync(file); } catch (error) {
+    if (isMissing(error)) return null;
+    throw betaError("OPERATION_IN_DOUBT", "Unable to inspect private state.");
+  }
+  return readPrivateBytes(file).bytes;
 }

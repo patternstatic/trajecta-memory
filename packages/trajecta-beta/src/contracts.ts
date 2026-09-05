@@ -1,4 +1,4 @@
-import type { TransferPacket } from "../../../src/types.ts";
+import type { Delta, TransferPacket, WorkItem } from "../../../src/types.ts";
 
 export interface LocalWorkspaceTargetCardV1 {
   schema: "trajecta.local-target/v1";
@@ -68,4 +68,29 @@ export interface LocalResumeReceiptV1 {
   provenance: string[];
   evidence: string[];
   createdAt: string;
+}
+
+export type OperationState = "created" | "inspected" | "reserved" | "kernel-resumed" | "receipt-committed" | "target-consumed" | "inspection-required";
+
+export interface LocalOperationRecordV1 {
+  schema: "trajecta.local-operation/v1";
+  operationId: string;
+  attemptDigest: string;
+  envelopeId: string;
+  targetId: string;
+  state: OperationState;
+  transitions: Array<{ state: OperationState; observedAt: string }>;
+  acceptance: { source: "runtime-flag"; observedAt: string } | null;
+  kernelResult: { work: WorkItem; delta: Delta } | null;
+  receipt: LocalResumeReceiptV1 | null;
+  doubtReason: string | null;
+}
+
+export interface WriterLockV1 {
+  schema: "trajecta.writer-lock/v1";
+  operationId: string;
+  pid: number;
+  hostname: string;
+  processStartToken: string;
+  acquiredAt: string;
 }
