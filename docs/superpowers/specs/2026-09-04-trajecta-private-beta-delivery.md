@@ -491,3 +491,12 @@ no other outer archive member may use it. The auditor must validate the ledger
 against the compressed bytes before installation or extraction. This is a
 classification refinement only; the exact customer archive tree in section 9
 remains unchanged.
+
+**2026-09-05 addendum — Apache modification notices:** The package tgz must
+also contain `LICENSES/CORE-MODIFICATIONS.txt`. It conservatively identifies
+every staged Apache-derived file marked modified by the release license policy;
+an unknown modification status is treated as modified. The archive's existing
+`LICENSES/CORE-NOTICE.txt` path must fold in the identical modification notice,
+alongside the applicable core NOTICE text. The assembler and auditor fail if a
+modified Apache-derived file lacks that notice. This adds a file only inside the
+existing tgz and changes no outer archive path.
