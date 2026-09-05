@@ -7,7 +7,7 @@ import { releaseError } from "./errors.ts";
 
 const FLAGS = ["--private-key", "--public-key", "--git-bin", "--npm-cli", "--build-commit", "--release-instant", "--verification-instant", "--output-dir"] as const;
 type Flag = typeof FLAGS[number];
-export type ReleaseCliArguments = ({ command: "build" } & Omit<BuildReleaseOptions, "sourceRoot">) | { command: "audit"; archive: string; archiveSha256: string; publicKey: string; keyFingerprint: string; releaseInstant: string } | { command: "verify"; archive: string; archiveSha256: string; publicKey: string; keyFingerprint: string; releaseInstant: string; outputDir: string };
+export type ReleaseCliArguments = ({ command: "build" | "build-commercial-candidate" } & Omit<BuildReleaseOptions, "sourceRoot" | "releaseKind">) | { command: "audit"; archive: string; archiveSha256: string; publicKey: string; keyFingerprint: string; releaseInstant: string } | { command: "verify"; archive: string; archiveSha256: string; publicKey: string; keyFingerprint: string; releaseInstant: string; outputDir: string };
 
 function flags(argv: readonly string[], expected: readonly string[]): Map<string, string> {
   if (argv.length !== 1 + expected.length * 2) return releaseError("INVALID_ARGUMENT", "Release command requires every accepted flag exactly once.");
@@ -21,18 +21,19 @@ function flags(argv: readonly string[], expected: readonly string[]): Map<string
 }
 
 export function parseReleaseCli(argv: readonly string[]): ReleaseCliArguments {
-  if (argv[0] === "build") {
+  if (argv[0] === "build" || argv[0] === "build-commercial-candidate") {
     const values = flags(argv, FLAGS);
-    return Object.freeze({ command: "build", privateKey: values.get("--private-key")!, publicKey: values.get("--public-key")!, gitBin: values.get("--git-bin")!, npmCli: values.get("--npm-cli")!, buildCommit: values.get("--build-commit")!, releaseInstant: values.get("--release-instant")!, verificationInstant: values.get("--verification-instant")!, outputDir: values.get("--output-dir")! });
+    return Object.freeze({ command: argv[0], privateKey: values.get("--private-key")!, publicKey: values.get("--public-key")!, gitBin: values.get("--git-bin")!, npmCli: values.get("--npm-cli")!, buildCommit: values.get("--build-commit")!, releaseInstant: values.get("--release-instant")!, verificationInstant: values.get("--verification-instant")!, outputDir: values.get("--output-dir")! });
   }
   const trust = ["--archive", "--archive-sha256", "--public-key", "--key-fingerprint", "--release-instant"];
   if (argv[0] === "audit") { const values = flags(argv, trust); return Object.freeze({ command: "audit", archive: values.get("--archive")!, archiveSha256: values.get("--archive-sha256")!, publicKey: values.get("--public-key")!, keyFingerprint: values.get("--key-fingerprint")!, releaseInstant: values.get("--release-instant")! }); }
   if (argv[0] === "verify") { const values = flags(argv, [...trust, "--output-dir"]); return Object.freeze({ command: "verify", archive: values.get("--archive")!, archiveSha256: values.get("--archive-sha256")!, publicKey: values.get("--public-key")!, keyFingerprint: values.get("--key-fingerprint")!, releaseInstant: values.get("--release-instant")!, outputDir: values.get("--output-dir")! }); }
-  return releaseError("INVALID_COMMAND", "Release command must be build, audit, or verify.");
+  return releaseError("INVALID_COMMAND", "Release command must be build, build-commercial-candidate, audit, or verify.");
 }
 
-export function buildOptionsFromCli(input: Extract<ReleaseCliArguments, { command: "build" }>, sourceRoot: string): BuildReleaseOptions {
-  return Object.freeze({ sourceRoot, privateKey: input.privateKey, publicKey: input.publicKey, gitBin: input.gitBin, npmCli: input.npmCli, buildCommit: input.buildCommit, releaseInstant: input.releaseInstant, verificationInstant: input.verificationInstant, outputDir: input.outputDir });
+export function buildOptionsFromCli(input: Extract<ReleaseCliArguments, { command: "build" | "build-commercial-candidate" }>, sourceRoot: string): BuildReleaseOptions {
+  const common = { sourceRoot, privateKey: input.privateKey, publicKey: input.publicKey, gitBin: input.gitBin, npmCli: input.npmCli, buildCommit: input.buildCommit, releaseInstant: input.releaseInstant, verificationInstant: input.verificationInstant, outputDir: input.outputDir };
+  return Object.freeze(input.command === "build-commercial-candidate" ? { ...common, releaseKind: "commercial-candidate" as const } : common);
 }
 
 function regularBytes(value: string, label: string): Buffer {
@@ -43,7 +44,7 @@ function regularBytes(value: string, label: string): Buffer {
 
 export function runReleaseCli(argv: readonly string[], sourceRoot: string): string {
   const input = parseReleaseCli(argv);
-  if (input.command === "build") {
+  if (input.command === "build" || input.command === "build-commercial-candidate") {
     const result = buildRelease(buildOptionsFromCli(input, sourceRoot));
     return `${JSON.stringify({ archiveSha256: result.archiveSha256, publicKeyFingerprint: result.publicKeyFingerprint, archivePath: result.archivePath, pinsPath: result.pinsPath, evidencePath: result.evidencePath })}\n`;
   }

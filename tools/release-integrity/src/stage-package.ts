@@ -3,7 +3,7 @@ import { stripTypeScriptTypes } from "node:module";
 import path from "node:path";
 import { TextDecoder } from "node:util";
 import { sha256Hex } from "./canonical.ts";
-import { assertSafeArchivePath, ORIGINAL_LICENSE_CLASSES, type OriginalLicenseClass } from "./contracts.ts";
+import { assertSafeArchivePath, ORIGINAL_LICENSE_CLASSES, resolveReleaseKind, type OriginalLicenseClass, type ReleaseKind } from "./contracts.ts";
 import { releaseError } from "./errors.ts";
 import type { SnapshotEntry, SourceSnapshot } from "./preflight-source.ts";
 
@@ -34,6 +34,7 @@ export interface StagePackageOptions {
   snapshot: SourceSnapshot;
   /** A new, absolute staging directory. The package is created below it. */
   stageDirectory: string;
+  releaseKind?: ReleaseKind;
 }
 
 export interface StagedPackage {
@@ -354,6 +355,9 @@ function assertStagedImports(packageRoot: string, members: readonly StagedMember
 export function stagePackage(options: StagePackageOptions): StagedPackage {
   const index = indexSnapshot(options.snapshot);
   for (const required of SNAPSHOT_REQUIRED) if (!index.entries.has(required)) releaseError("SNAPSHOT_INPUT_MISSING", "Snapshot lacks a required package-staging input.");
+  const releaseKind = resolveReleaseKind(options.releaseKind);
+  const termsSource = releaseKind === "commercial-candidate" ? "release/commercial-candidate/LICENSES/BETA-COMMERCIAL-TERMS.txt" : "release/evaluation/LICENSES/BETA-COMMERCIAL-TERMS.txt";
+  if (!index.entries.has(termsSource)) releaseError("SNAPSHOT_INPUT_MISSING", "Snapshot lacks the selected release terms.");
   const template = readSnapshot(index, "release/trajecta-beta.package.json");
   parsePackageTemplate(template);
   const plannedPaths = parseStagedPolicyPaths(readSnapshot(index, "release/payload-policy.json"));
@@ -381,7 +385,7 @@ export function stagePackage(options: StagePackageOptions): StagedPackage {
     for (const sourcePath of collectCoreSources(index)) writeMember(packageRoot, `core/src/${sourcePath.slice(CORE_SOURCE_PREFIX.length).replace(/\.ts$/, ".js")}`, compileRuntimeSource(readSnapshot(index, sourcePath), "Core source"), "0644", licenseMap, members);
     writeMember(packageRoot, "LICENSE", readSnapshot(index, "LICENSE"), "0644", licenseMap, members);
     writeMember(packageRoot, "NOTICE", readSnapshot(index, "NOTICE"), "0644", licenseMap, members);
-    writeMember(packageRoot, "BETA-COMMERCIAL-TERMS.txt", readSnapshot(index, "release/evaluation/LICENSES/BETA-COMMERCIAL-TERMS.txt"), "0644", licenseMap, members);
+    writeMember(packageRoot, "BETA-COMMERCIAL-TERMS.txt", readSnapshot(index, termsSource), "0644", licenseMap, members);
     const modificationEntries = [...licenseMap.values()];
     writeMember(packageRoot, "LICENSES/CORE-MODIFICATIONS.txt", renderCoreModificationsFromEntries(modificationEntries), "0644", licenseMap, members);
     members.sort((left, right) => samePathOrder(left.path, right.path));

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { canonicalJsonLf, sha256Hex } from "./canonical.ts";
-import { assertNewOutputDirectory, parseReleasePins } from "./contracts.ts";
+import { assertNewOutputDirectory, parseReleasePins, resolveReleaseKind, type ReleaseKind } from "./contracts.ts";
 import { releaseError } from "./errors.ts";
 import { assembleBundle, verifyBundle } from "./assemble.ts";
 import { packPackage } from "./pack-package.ts";
@@ -16,6 +16,7 @@ const BUILDER_NODE_VERSION = "v22.23.1";
 export interface BuildReleaseOptions {
   sourceRoot: string; gitBin: string; npmCli: string; buildCommit: string;
   releaseInstant: string; verificationInstant: string; privateKey: string; publicKey: string; outputDir: string;
+  releaseKind?: ReleaseKind;
 }
 export interface BuiltRelease { archivePath: string; pinsPath: string; evidencePath: string; archiveSha256: string; publicKeyFingerprint: string; }
 
@@ -61,24 +62,30 @@ function snapshotBytes(snapshot: SourceSnapshot, relative: string): Buffer {
   return bytes;
 }
 
-function documents(snapshot: SourceSnapshot, modificationNotice: Buffer): ReadonlyMap<string, Buffer> {
+function documentSource(releaseKind: ReleaseKind, name: typeof DOCUMENT_INPUTS[number]): string {
+  if (releaseKind === "commercial-candidate" && (name === "START-HERE.html" || name === "START-HERE.md" || name === "SUPPORTED-ENVIRONMENT.md")) return `release/commercial-candidate/payload/${name}`;
+  return `release/evaluation/payload/${name}`;
+}
+
+function documents(snapshot: SourceSnapshot, modificationNotice: Buffer, releaseKind: ReleaseKind): ReadonlyMap<string, Buffer> {
   const result = new Map<string, Buffer>();
-  for (const name of DOCUMENT_INPUTS) result.set(name, snapshotBytes(snapshot, `release/evaluation/payload/${name}`));
+  for (const name of DOCUMENT_INPUTS) result.set(name, snapshotBytes(snapshot, documentSource(releaseKind, name)));
   result.set("LICENSES/CORE-APACHE-2.0.txt", snapshotBytes(snapshot, "LICENSE"));
   const notice = snapshotBytes(snapshot, "NOTICE");
   result.set("LICENSES/CORE-NOTICE.txt", Buffer.concat([notice, Buffer.from("\n"), modificationNotice]));
-  result.set("LICENSES/BETA-COMMERCIAL-TERMS.txt", snapshotBytes(snapshot, "release/evaluation/LICENSES/BETA-COMMERCIAL-TERMS.txt"));
+  const terms = releaseKind === "commercial-candidate" ? "release/commercial-candidate/LICENSES/BETA-COMMERCIAL-TERMS.txt" : "release/evaluation/LICENSES/BETA-COMMERCIAL-TERMS.txt";
+  result.set("LICENSES/BETA-COMMERCIAL-TERMS.txt", snapshotBytes(snapshot, terms));
   result.set("THIRD-PARTY-NOTICES.txt", snapshotBytes(snapshot, "release/evaluation/THIRD-PARTY-NOTICES.txt"));
   return result;
 }
 
-function buildOne(snapshot: SourceSnapshot, options: BuildReleaseOptions, publicKeyPem: string, privateKeyPem: string) {
+function buildOne(snapshot: SourceSnapshot, options: BuildReleaseOptions, publicKeyPem: string, privateKeyPem: string, releaseKind: ReleaseKind) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "trajecta-release-build-"));
   try {
-    const staged = stagePackage({ snapshot, stageDirectory: path.join(root, "stage") });
+    const staged = stagePackage({ snapshot, stageDirectory: path.join(root, "stage"), releaseKind });
     const packed = packPackage({ packageRoot: staged.packageRoot, members: staged.members, releaseInstant: options.releaseInstant });
     const modificationNotice = fs.readFileSync(path.join(staged.packageRoot, "LICENSES", "CORE-MODIFICATIONS.txt"));
-    const assembled = assembleBundle({ tgz: packed.tgz, memberLedger: packed.memberLedger, documents: documents(snapshot, modificationNotice), buildCommit: options.buildCommit, releaseInstant: options.releaseInstant, verificationInstant: options.verificationInstant, publicKeyPem, privateKeyPem });
+    const assembled = assembleBundle({ tgz: packed.tgz, memberLedger: packed.memberLedger, documents: documents(snapshot, modificationNotice, releaseKind), buildCommit: options.buildCommit, releaseInstant: options.releaseInstant, verificationInstant: options.verificationInstant, publicKeyPem, privateKeyPem, releaseKind });
     verifyBundle({ zip: assembled.zip, archiveSha256: assembled.archiveSha256, publicKeyPem, publicKeyFingerprint: assembled.publicKeyFingerprint, releaseInstant: options.releaseInstant });
     return { ...assembled, packed };
   } finally { fs.rmSync(root, { recursive: true, force: true, maxRetries: 2 }); }
@@ -87,7 +94,9 @@ function buildOne(snapshot: SourceSnapshot, options: BuildReleaseOptions, public
 /** Runs two clean immutable builds, then writes the ZIP and external pins only after both gates pass. */
 export function buildRelease(options: BuildReleaseOptions): BuiltRelease {
   const keys = ["sourceRoot", "gitBin", "npmCli", "buildCommit", "releaseInstant", "verificationInstant", "privateKey", "publicKey", "outputDir"];
-  if (!options || Object.keys(options).length !== keys.length || keys.some(key => !Object.hasOwn(options, key)) || typeof options.sourceRoot !== "string" || !path.isAbsolute(options.sourceRoot)) return releaseError("INVALID_BUILD_INPUT", "Build requires complete explicit frozen inputs.");
+  const suppliedKeys = Object.keys(options ?? {});
+  if (!options || (suppliedKeys.length !== keys.length && suppliedKeys.length !== keys.length + 1) || keys.some(key => !Object.hasOwn(options, key)) || suppliedKeys.some(key => !keys.includes(key) && key !== "releaseKind") || typeof options.sourceRoot !== "string" || !path.isAbsolute(options.sourceRoot)) return releaseError("INVALID_BUILD_INPUT", "Build requires complete explicit frozen inputs.");
+  const releaseKind = resolveReleaseKind(options.releaseKind);
   let source: string;
   try { source = fs.realpathSync(options.sourceRoot); }
   catch { return releaseError("INVALID_SOURCE_ROOT", "Build source root is unavailable."); }
@@ -99,9 +108,9 @@ export function buildRelease(options: BuildReleaseOptions): BuiltRelease {
   let firstSnapshot: SourceSnapshot | undefined, secondSnapshot: SourceSnapshot | undefined;
   try {
     firstSnapshot = preflightSource({ sourceRoot: source, gitBin: options.gitBin, buildCommit: options.buildCommit, policy });
-    const first = buildOne(firstSnapshot, options, publicKeyPem, privateKeyPem);
+    const first = buildOne(firstSnapshot, options, publicKeyPem, privateKeyPem, releaseKind);
     secondSnapshot = preflightSource({ sourceRoot: source, gitBin: options.gitBin, buildCommit: options.buildCommit, policy });
-    const second = buildOne(secondSnapshot, options, publicKeyPem, privateKeyPem);
+    const second = buildOne(secondSnapshot, options, publicKeyPem, privateKeyPem, releaseKind);
     if (!first.zip.equals(second.zip) || first.archiveSha256 !== second.archiveSha256 || first.publicKeyFingerprint !== second.publicKeyFingerprint) return releaseError("REPRODUCIBILITY_MISMATCH", "Independent frozen builds did not produce identical archives.");
     const offline = runControlledOfflineInstall({ tgz: first.packed.tgz, memberLedger: first.packed.memberLedger, releaseInstant: options.releaseInstant, npmCli: options.npmCli });
     fs.mkdirSync(output, { mode: 0o700 });
