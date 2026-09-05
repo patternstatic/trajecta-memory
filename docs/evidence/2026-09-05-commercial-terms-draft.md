@@ -1,6 +1,7 @@
 # Trajecta beta — proposed customer terms
 
-Status: DRAFT FOR TY APPROVAL. Not an active license, offer or refund promise.
+Status: APPROVED BY TY FOR COMMERCIAL PREPARATION in this task ("ok đó cha",
+followed by "chốt"). Not yet an activated offer or issued customer license.
 Legal seller identity remains to be supplied by the human operator before sale.
 This draft is not a jurisdiction-specific legal compliance review.
 
@@ -50,8 +51,8 @@ send a redacted error code and the failed step.
 
 ## Approval and activation boundary
 
-Ty must approve this proposed license/support/refund package before it becomes
-customer-facing. Approval to prepare a commercial archive is not approval to
+Ty has approved this license/support/refund package for commercial preparation.
+Approval to prepare a commercial archive is not approval to
 publish, activate checkout, accept a purchase, send email or move money. Once
 approved, a new immutable commercial candidate must be built and verified;
 the existing signed evaluation archive remains unchanged.

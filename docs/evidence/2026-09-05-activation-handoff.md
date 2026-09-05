@@ -34,6 +34,12 @@ internal tests or zero-value orders. This approval does not activate checkout.
 
 Ty decisions still needed before a commercial build:
 
+Update: Ty subsequently approved the concrete license/support/refund draft and
+confirmed "chốt". Items 1 and 2 below are historical approval requests, now
+resolved for commercial preparation; see `2026-09-05-commercial-terms-draft.md`.
+Legal seller identity remains a pre-sale field, not a reason to request the
+already approved price/support/refund terms again. Item 3 remains separate.
+
 Support contact resolved after Ty explicitly directed use of Lam's email:
 `lam.thisside@gmail.com`, from the retained identity roster in
 `Lam-Continuity-Pack/memory/LTM-Lam.md` (Lam's separate email identity).
