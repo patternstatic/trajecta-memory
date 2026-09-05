@@ -153,7 +153,29 @@ test("rejection path cannot reserve, gain acceptance, use an accepted receipt, o
     const rejected = journal.transition(input.operationId, "receipt-committed", { receipt: receipt() }, writer);
     assert.equal(rejected.acceptance, null); assert.equal(rejected.kernelResult, null);
     for (const next of ["reserved", "kernel-resumed", "target-consumed", "created"] as const) assert.throws(() => journal.transition(input.operationId, next, {}, writer), code("OPERATION_CONFLICT"));
-    assert.throws(() => journal.markInspectionRequired(input.operationId, "late", writer), code("OPERATION_CONFLICT"));
+    const quarantined = journal.markInspectionRequired(input.operationId, "late", writer);
+    assert.equal(quarantined.state, "inspection-required");
+    assert.deepEqual(quarantined.receipt, rejected.receipt);
+    assert.equal(quarantined.acceptance, null); assert.equal(quarantined.kernelResult, null);
+  });
+});
+
+test("completed accepted evidence can only escape into immutable inspection-required", async (t) => {
+  const stateRoot = root(t);
+  await withWriterLock(options(stateRoot), writer => {
+    const journal = new OperationJournal({ stateRoot }); journal.open(input, writer);
+    journal.transition(input.operationId, "inspected", {}, writer);
+    journal.transition(input.operationId, "reserved", { acceptance }, writer);
+    journal.transition(input.operationId, "kernel-resumed", { kernelResult }, writer);
+    journal.transition(input.operationId, "receipt-committed", { receipt: receipt(true) }, writer);
+    const completed = journal.transition(input.operationId, "target-consumed", {}, writer);
+    for (const state of ["created", "inspected", "reserved", "kernel-resumed", "receipt-committed"] as const) assert.throws(() => journal.transition(input.operationId, state, {}, writer), code("OPERATION_CONFLICT"));
+    const marked = journal.markInspectionRequired(input.operationId, "cross-file mismatch", writer);
+    assert.equal(marked.transitions.length, 7);
+    assert.deepEqual(marked.kernelResult, completed.kernelResult);
+    assert.deepEqual(marked.receipt, completed.receipt);
+    assert.deepEqual(marked.acceptance, completed.acceptance);
+    assert.throws(() => journal.transition(input.operationId, "target-consumed", {}, writer), code("OPERATION_CONFLICT"));
   });
 });
 

@@ -211,6 +211,25 @@ export class TargetRegistry {
     });
   }
 
+  /** Recovery checks require existing durable authority and deliberately ignore expiry. */
+  assertIssued(card: LocalWorkspaceTargetCardV1): void {
+    this.withLockedRecord(card, undefined, record => {
+      if (record.state !== "issued") inDoubt("The durable target is not issued.");
+    });
+  }
+
+  assertReservation(card: LocalWorkspaceTargetCardV1, operationId: string, attemptDigest: string): void {
+    this.withLockedRecord(card, undefined, record => {
+      if (record.state !== "reserved" || record.operationId !== operationId || record.attemptDigest !== attemptDigest) inDoubt("The exact durable target reservation is missing.");
+    });
+  }
+
+  assertConsumed(card: LocalWorkspaceTargetCardV1, operationId: string, attemptDigest: string, receiptId: string): void {
+    this.withLockedRecord(card, undefined, record => {
+      if (record.state !== "consumed" || record.operationId !== operationId || record.attemptDigest !== attemptDigest || record.receiptId !== receiptId) inDoubt("The exact durable target consumption is missing.");
+    });
+  }
+
   consume(card: LocalWorkspaceTargetCardV1, operationId: string, receiptId: string): void {
     if (!opaqueId(operationId, "operation:") || !opaqueId(receiptId, "receipt:")) throw betaError("OPERATION_CONFLICT", "Operation ID and receipt ID are invalid.");
     this.withLockedRecord(card, "consume", (record, journal) => {

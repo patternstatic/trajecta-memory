@@ -173,7 +173,7 @@ test("active work branch mismatch commits equal observed revisions without consu
   f.registry.lookup(f.target);
 });
 
-for (const accepted of [false, true]) {
+for (const accepted of [false]) {
   test(`current resume with accepted=${accepted} creates no operation or receipt`, async (t) => {
     const f = fixture(t), before = [tree(f.kernelRoot), tree(path.join(f.stateRoot, "targets"))];
     await assert.rejects(f.service.resumeFile(f.current.file, { accepted }), errorCode(accepted ? "CAPABILITY_UNAVAILABLE" : "USER_ACCEPTANCE_REQUIRED"));

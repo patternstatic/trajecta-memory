@@ -72,6 +72,8 @@ export interface LocalResumeReceiptV1 {
 
 export type OperationState = "created" | "inspected" | "reserved" | "kernel-resumed" | "receipt-committed" | "target-consumed" | "inspection-required";
 
+export type ResumeFaultPoint = "after-target-reserve" | "after-kernel-resume" | "after-receipt-commit" | "after-target-consume";
+
 export interface LocalOperationRecordV1 {
   schema: "trajecta.local-operation/v1";
   operationId: string;

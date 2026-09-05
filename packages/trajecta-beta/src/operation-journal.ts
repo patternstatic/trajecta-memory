@@ -47,7 +47,7 @@ function validRecord(value: unknown): value is LocalOperationRecordV1 {
   for (const entry of record.transitions) {
     if (!exactObject(entry, ["state", "observedAt"]) || !validTimestamp(entry.observedAt)) return false;
     const previous = states.at(-1);
-    if (previous === undefined ? entry.state !== "created" : !ADJACENT.has(`${previous}:${entry.state}`) && !(entry.state === "inspection-required" && previous !== "target-consumed" && previous !== "inspection-required")) return false;
+    if (previous === undefined ? entry.state !== "created" : !ADJACENT.has(`${previous}:${entry.state}`) && !(entry.state === "inspection-required" && previous !== "inspection-required")) return false;
     states.push(entry.state);
   }
   if (states.at(-1) !== record.state) return false;
@@ -57,7 +57,7 @@ function validRecord(value: unknown): value is LocalOperationRecordV1 {
   if (committed) {
     if (!validLocalResumeReceipt(record.receipt) || !sameIdentity(record.receipt, record) || (record.receipt.outcome === "accepted") !== resumed) return false;
     if (resumed && record.kernelResult && (record.receipt.workId !== record.kernelResult.work.id || record.receipt.branchId !== record.kernelResult.work.activeBranchId || record.receipt.observedRevisionAfter !== record.kernelResult.work.revision)) return false;
-    if (!resumed && (states.includes("target-consumed") || record.state === "inspection-required")) return false;
+    if (!resumed && states.includes("target-consumed")) return false;
   } else if (record.receipt !== null) return false;
   return record.state === "inspection-required" ? inspectionReason(record.doubtReason) : record.doubtReason === null;
 }
@@ -101,7 +101,7 @@ export class OperationJournal {
       if (canonicalJson(next) !== canonicalJson(before)) conflict("Repeated transition changed the complete operation record.");
       return before;
     }
-    if (before.state === "inspection-required" || before.state === "target-consumed" || (before.state === "receipt-committed" && before.receipt?.outcome === "rejected")) conflict("Terminal operations cannot transition.");
+    if (before.state === "inspection-required" || (state !== "inspection-required" && (before.state === "target-consumed" || (before.state === "receipt-committed" && before.receipt?.outcome === "rejected")))) conflict("Terminal operations can only be quarantined for inspection.");
     if (!ADJACENT.has(`${before.state}:${state}`) && state !== "inspection-required") conflict("Operation transition must be adjacent.");
     for (const key of ["acceptance", "kernelResult", "receipt", "doubtReason"] as const) {
       if (!(key in update)) continue;
