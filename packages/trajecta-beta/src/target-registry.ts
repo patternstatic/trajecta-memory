@@ -197,8 +197,9 @@ export class TargetRegistry {
     });
   }
 
-  reserve(card: LocalWorkspaceTargetCardV1, operationId: string, attemptDigest: string, now = this.clock()): void {
+  reserve(card: LocalWorkspaceTargetCardV1, operationId: string, attemptDigest: string, nowOrClock: Date | (() => Date) = this.clock, authorizationExpiresAt?: string): void {
     if (!opaqueId(operationId, "operation:") || !SHA256.test(attemptDigest)) throw betaError("OPERATION_CONFLICT", "Operation ID and attempt digest are invalid.");
+    if (authorizationExpiresAt !== undefined && !timestamp(authorizationExpiresAt)) throw betaError("OPERATION_CONFLICT", "The authorization deadline must be a canonical ISO timestamp.");
     this.withLockedRecord(card, "reserve", (record, journal) => {
       if (record.state === "reserved") {
         if (record.operationId === operationId && record.attemptDigest === attemptDigest) return;
@@ -206,12 +207,26 @@ export class TargetRegistry {
         throw betaError("TARGET_CONSUMED", "The local target is reserved by another operation.");
       }
       if (record.state === "consumed") throw betaError("TARGET_CONSUMED", "The local target has already been consumed.");
+      // Sample after lock acquisition and verified record read, at the final authorization boundary.
+      const now = typeof nowOrClock === "function" ? nowOrClock() : nowOrClock;
       this.requireFresh(record, now);
+      if (authorizationExpiresAt !== undefined && Date.parse(authorizationExpiresAt) <= now.getTime()) throw betaError("TARGET_EXPIRED", "The resume authorization has expired.");
       this.appendTransition(card.targetId, journal, { ...record, state: "reserved", operationId, attemptDigest });
     });
   }
 
   /** Recovery checks require existing durable authority and deliberately ignore expiry. */
+  hasReservation(card: LocalWorkspaceTargetCardV1, operationId: string, attemptDigest: string): boolean {
+    if (!opaqueId(operationId, "operation:") || !SHA256.test(attemptDigest)) throw betaError("OPERATION_CONFLICT", "Operation ID and attempt digest are invalid.");
+    let exact = false;
+    this.withLockedRecord(card, undefined, record => {
+      if (record.state !== "reserved" || record.operationId !== operationId) return;
+      if (record.attemptDigest !== attemptDigest) throw betaError("OPERATION_CONFLICT", "The target reservation is bound to a different attempt.");
+      exact = true;
+    });
+    return exact;
+  }
+
   assertIssued(card: LocalWorkspaceTargetCardV1): void {
     this.withLockedRecord(card, undefined, record => {
       if (record.state !== "issued") inDoubt("The durable target is not issued.");

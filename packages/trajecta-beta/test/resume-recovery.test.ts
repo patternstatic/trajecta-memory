@@ -50,8 +50,88 @@ function fixture(t: test.TestContext) {
   const targetRecord = () => JSON.parse(fs.readFileSync(targetFile, "utf8").trim().split("\n").at(-1)!);
   const deltas = () => new TrajectaStore(kernelRoot, clock).history(opened.work.id).filter(d => d.operationId === `${operationId}.kernel`);
   return { root, cwd, stateRoot, kernelRoot, store, target, envelope, file, registry, journal, receipts, options, service, targetFile, targetRecord, deltas,
-    workId: opened.work.id, clock, expire: () => { now = new Date("2026-09-06T00:00:00.000Z"); } };
+    workId: opened.work.id, clock, setNow: (value: string) => { now = new Date(value); }, expire: () => { now = new Date("2026-09-06T00:00:00.000Z"); } };
 }
+
+for (const deadline of ["target", "envelope"] as const) test(`final reservation rejects ${deadline} expiry reached while acquiring target lock`, async t => {
+  const f = fixture(t);
+  const payload = envelopePayload(f.envelope);
+  if (deadline === "envelope") payload.expiresAt = "2026-09-05T00:01:00.000Z";
+  const envelope = buildLocalResumeEnvelope(payload); fs.writeFileSync(f.file, JSON.stringify(envelope));
+  const registry = new TargetRegistry({ stateRoot: f.stateRoot, clock: f.clock, onTargetLockAcquired: transition => {
+    if (transition === "reserve") f.setNow(envelope.expiresAt);
+  } });
+  await assert.rejects(f.service({ registry }).resumeFile(f.file, { accepted: true }), errorCode("TARGET_EXPIRED"));
+  assert.equal(f.targetRecord().state, "issued"); assert.equal(f.deltas().length, 0);
+  assert.equal(f.store.getWork(f.workId).revision, 2); assert.equal(f.receipts.readBytes(operationId), null);
+  assert.equal(f.journal.lookup(operationId)?.acceptance, null);
+});
+
+test("exact orphan reservation is quarantined once without inferring missing acceptance", async t => {
+  const f = fixture(t);
+  await assert.rejects(f.service({ fault: p => { if (p === "after-target-reserve") throw new Error("fault"); } }).resumeFile(f.file, { accepted: true }), /fault/);
+  fs.unlinkSync(path.join(f.stateRoot, "operations", `${sha256(operationId)}.json`)); f.expire();
+  const before = [tree(f.kernelRoot), tree(path.join(f.stateRoot, "targets"))];
+  await assert.rejects(f.service().resumeFile(f.file, { accepted: true }), errorCode("OPERATION_IN_DOUBT"));
+  const record = f.journal.lookup(operationId)!;
+  assert.deepEqual(record.transitions.map(t => t.state), ["created", "inspection-required"]);
+  assert.equal(record.acceptance, null); assert.equal(record.kernelResult, null); assert.equal(record.receipt, null);
+  assert.deepEqual([tree(f.kernelRoot), tree(path.join(f.stateRoot, "targets"))], before);
+  const quarantined = [tree(f.kernelRoot), tree(f.stateRoot)];
+  await assert.rejects(f.service().resumeFile(f.file, { accepted: true }), errorCode("OPERATION_IN_DOUBT"));
+  assert.deepEqual([tree(f.kernelRoot), tree(f.stateRoot)], quarantined);
+});
+
+test("orphan reservation with the same operation but altered digest remains a conflict", async t => {
+  const f = fixture(t);
+  f.registry.reserve(f.target, operationId, f.envelope.integrity.canonicalPayloadDigest);
+  const payload = envelopePayload(f.envelope); payload.packet.cue = "Changed"; finalizePacketBudget(payload.packet);
+  fs.writeFileSync(f.file, JSON.stringify(buildLocalResumeEnvelope(payload))); f.expire();
+  const before = [tree(f.kernelRoot), tree(path.join(f.stateRoot, "targets"))];
+  await assert.rejects(f.service().resumeFile(f.file, { accepted: true }), errorCode("OPERATION_CONFLICT"));
+  assert.equal(f.journal.lookup(operationId), null); assert.equal(f.receipts.readBytes(operationId), null);
+  assert.deepEqual([tree(f.kernelRoot), tree(path.join(f.stateRoot, "targets"))], before);
+});
+
+test("reservation belonging to another operation is ordinary occupied target without quarantine", async t => {
+  const f = fixture(t); f.registry.reserve(f.target, "operation:another", "a".repeat(64));
+  await assert.rejects(f.service().resumeFile(f.file, { accepted: true }), errorCode("TARGET_CONSUMED"));
+  assert.equal(f.journal.lookup(operationId), null); assert.equal(f.receipts.readBytes(operationId), null); assert.equal(f.deltas().length, 0);
+});
+
+test("orphan reservation classifier exposes only exact ownership and performs zero writes", t => {
+  const f = fixture(t), digest = f.envelope.integrity.canonicalPayloadDigest;
+  const issued = tree(f.stateRoot); assert.equal(f.registry.hasReservation(f.target, operationId, digest), false); assert.deepEqual(tree(f.stateRoot), issued);
+  f.registry.reserve(f.target, operationId, digest); f.expire();
+  const reserved = tree(f.stateRoot);
+  assert.equal(f.registry.hasReservation(f.target, operationId, digest), true);
+  assert.equal(f.registry.hasReservation(f.target, "operation:another", digest), false);
+  assert.throws(() => f.registry.hasReservation(f.target, operationId, "b".repeat(64)), errorCode("OPERATION_CONFLICT"));
+  assert.throws(() => f.registry.hasReservation({ ...f.target, capability: "capability:wrong" }, operationId, digest), errorCode("TARGET_MISMATCH"));
+  assert.deepEqual(tree(f.stateRoot), reserved);
+  f.registry.consume(f.target, operationId, "receipt:one"); const consumed = tree(f.stateRoot);
+  assert.equal(f.registry.hasReservation(f.target, operationId, digest), false); assert.deepEqual(tree(f.stateRoot), consumed);
+});
+
+test("reservation rejects invalid authorization deadlines before changing an issued target", t => {
+  const f = fixture(t), before = tree(f.stateRoot);
+  for (const deadline of ["bad", "2026-09-05", "2026-09-05T00:15:00+00:00"]) {
+    assert.throws(() => f.registry.reserve(f.target, operationId, f.envelope.integrity.canonicalPayloadDigest, f.clock, deadline), errorCode("OPERATION_CONFLICT"));
+  }
+  assert.deepEqual(tree(f.stateRoot), before);
+});
+
+test("registry samples its default clock under lock and exact reservation retry never samples again", t => {
+  const f = fixture(t), digest = f.envelope.integrity.canonicalPayloadDigest;
+  const registry = new TargetRegistry({ stateRoot: f.stateRoot, clock: f.clock, onTargetLockAcquired: transition => { if (transition === "reserve") f.expire(); } });
+  assert.throws(() => registry.reserve(f.target, operationId, digest), errorCode("TARGET_EXPIRED"));
+  assert.equal(f.targetRecord().state, "issued");
+  // Explicit historical Date remains a supported deterministic injection.
+  f.registry.reserve(f.target, operationId, digest, new Date(instant));
+  const before = tree(f.stateRoot);
+  f.registry.reserve(f.target, operationId, digest, () => assert.fail("exact reserved replay cannot resample time"), instant);
+  assert.deepEqual(tree(f.stateRoot), before);
+});
 
 test("accepted resume advances once, commits numeric revisions, and consumes one exact target", async t => {
   const f = fixture(t);
