@@ -60,3 +60,26 @@ acceptance gate. Commercial activation and public marketing remain excluded.
    delivery test, remain necessary before commercial activation.
 
 No narrower completion claim should replace those open requirements.
+
+## Rebuilt evaluation artifact
+
+At clean build commit `fe639b30573a7ad169b9fe9d4687d9086d36c521`, the real seller
+executable rebuilt two matching archives using pinned Node 22.23.1/npm 10.9.8.
+All 47 release tests passed. The controlled offline install passed before
+output publication. The final ZIP was read back and audited before external
+pins and evidence were written.
+
+- ZIP: `Downloads/trajecta-evaluation-20260905-0630/trajecta-verified-resume-sdk-beta-0.1.0.zip`
+- SHA-256: `d175105fe80c73ec3bf727d65135b137f99d61f22b77f31ce0ddbe8417288347`
+- Independently retained evaluation-key fingerprint:
+  `eab52d34e247dd0f2b0b0972bab6368d52cc372321828859f39e51533f685c1b`
+- Release instant: `2026-09-05T06:30:00Z`.
+- A separate executable `verify` invocation supplied that literal digest and
+  independent public key, then extracted all 17 allowed files to a new private
+  directory. The archive now contains the executed manual recipes.
+- A fresh-context AI operator received only this ZIP, independent trust values,
+  and permission to follow its instructions; its outcome is not yet asserted
+  by this checkpoint.
+
+This is a ready-to-try **evaluation**, not completed Customer-0 acceptance and
+not authorized for sale. The original signed limitations remain unchanged.
