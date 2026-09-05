@@ -1,0 +1,22 @@
+{
+  "name": "@patternstatic/trajecta-beta",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.19 <23"
+  },
+  "bin": {
+    "trajecta-beta": "bin/trajecta-beta"
+  },
+  "files": [
+    "bin/trajecta-beta",
+    "beta/DEVELOPMENT-BOUNDARY.md",
+    "beta/src",
+    "core/src",
+    "LICENSE",
+    "NOTICE",
+    "BETA-COMMERCIAL-TERMS.txt",
+    "LICENSES/CORE-MODIFICATIONS.txt"
+  ]
+}
