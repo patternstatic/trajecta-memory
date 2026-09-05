@@ -1,6 +1,6 @@
-import { gunzipSync } from "node:zlib";
+import { inflateRawSync } from "node:zlib";
 import { sha256Hex } from "./canonical.ts";
-import { assertSafeArchivePath, parseReleaseInstant, type OriginalLicenseClass } from "./contracts.ts";
+import { ORIGINAL_LICENSE_CLASSES, assertSafeArchivePath, parseReleaseInstant, type OriginalLicenseClass } from "./contracts.ts";
 import { ReleaseIntegrityError, releaseError } from "./errors.ts";
 
 export interface TarLedgerMember {
@@ -39,6 +39,11 @@ const DEFAULT_LIMITS: TarAuditLimits = Object.freeze({
   maxCompressionRatio: 100,
 });
 const REQUIRED_PACKAGE_MEMBERS = ["beta/DEVELOPMENT-BOUNDARY.md", "LICENSES/CORE-MODIFICATIONS.txt"] as const;
+const CRC32_TABLE = Uint32Array.from({ length: 256 }, (_, seed) => {
+  let value = seed;
+  for (let bit = 0; bit < 8; bit++) value = (value >>> 1) ^ ((value & 1) ? 0xedb88320 : 0);
+  return value >>> 0;
+});
 
 function limitsFor(value: Partial<TarAuditLimits> | undefined): TarAuditLimits {
   const limits = { ...DEFAULT_LIMITS, ...value };
@@ -103,6 +108,40 @@ function assertGzipHeader(bytes: Buffer, limits: TarAuditLimits): void {
   if (bytes[0] !== 0x1f || bytes[1] !== 0x8b || bytes[2] !== 8 || bytes[3] !== 0 || bytes[4] !== 0 || bytes[5] !== 0 || bytes[6] !== 0 || bytes[7] !== 0 || bytes[8] !== 0 || bytes[9] !== 255) releaseError("INVALID_GZIP_HEADER", "Gzip header is not canonical.");
 }
 
+function readUint32LE(bytes: Buffer, offset: number): number {
+  return (bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16) | (bytes[offset + 3] << 24)) >>> 0;
+}
+
+function crc32(bytes: Buffer): number {
+  let value = 0xffffffff;
+  for (const byte of bytes) value = CRC32_TABLE[(value ^ byte) & 0xff] ^ (value >>> 8);
+  return (value ^ 0xffffffff) >>> 0;
+}
+
+function assertExpectedLedger(expected: readonly TarLedgerMember[] | undefined): void {
+  if (!expected) return;
+  let previous = "";
+  for (const member of expected) {
+    if (!member || typeof member !== "object" || typeof member.path !== "string" || !Number.isSafeInteger(member.bytes) || member.bytes < 0 || !/^[a-f0-9]{64}$/.test(member.sha256) || (member.mode !== "0644" && member.mode !== "0755") || !ORIGINAL_LICENSE_CLASSES.includes(member.originalClass)) releaseError("INVALID_TAR_LEDGER", "Expected tar member ledger is invalid.");
+    let memberPath: string;
+    try { memberPath = assertSafeArchivePath(member.path); }
+    catch { return releaseError("INVALID_TAR_LEDGER", "Expected tar member ledger has an unsafe path."); }
+    if (memberPath <= previous || (memberPath === "bin/trajecta-beta") !== (member.mode === "0755")) releaseError("INVALID_TAR_LEDGER", "Expected tar member ledger is not canonical.");
+    previous = memberPath;
+  }
+}
+
+function inflateOneCanonicalGzipMember(tgz: Buffer, limits: TarAuditLimits): Buffer {
+  assertGzipHeader(tgz, limits);
+  const deflate = tgz.subarray(10, tgz.length - 8);
+  let result: { buffer: Buffer; engine: { bytesWritten: number } };
+  try { result = inflateRawSync(deflate, { info: true, maxOutputLength: limits.maxUncompressedBytes }) as unknown as { buffer: Buffer; engine: { bytesWritten: number } }; }
+  catch { return releaseError("INVALID_GZIP_STREAM", "Gzip deflate stream is invalid or exceeds its bound."); }
+  const stream = result.buffer;
+  if (result.engine.bytesWritten !== deflate.length || readUint32LE(tgz, tgz.length - 8) !== crc32(stream) || readUint32LE(tgz, tgz.length - 4) !== (stream.length >>> 0)) releaseError("INVALID_GZIP_STREAM", "Gzip stream must contain one complete canonical member.");
+  return stream;
+}
+
 function matchesExpected(actual: readonly TarLedgerMember[], expected: readonly TarLedgerMember[]): boolean {
   return actual.length === expected.length && actual.every((member, index) => {
     const wanted = expected[index];
@@ -114,10 +153,8 @@ function matchesExpected(actual: readonly TarLedgerMember[], expected: readonly 
 export function auditTgz(tgz: Buffer, options: AuditTgzOptions): AuditedTgz {
   const limits = limitsFor(options.limits);
   const releaseSeconds = Math.floor(parseReleaseInstant(options.releaseInstant).valueOf() / 1000);
-  assertGzipHeader(tgz, limits);
-  let stream: Buffer;
-  try { stream = gunzipSync(tgz, { maxOutputLength: limits.maxUncompressedBytes }); }
-  catch { return releaseError("INVALID_TGZ", "Tarball gzip stream is invalid or exceeds its bound."); }
+  assertExpectedLedger(options.expectedMembers);
+  const stream = inflateOneCanonicalGzipMember(tgz, limits);
   if (stream.length < 1024 || stream.length > limits.maxUncompressedBytes || stream.length > tgz.length * limits.maxCompressionRatio) releaseError("TAR_LIMIT_EXCEEDED", "Uncompressed tarball exceeds its bound.");
   const members: TarLedgerMember[] = [];
   const names = new Set<string>();

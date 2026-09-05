@@ -143,3 +143,22 @@ test("fails closed when either mandatory in-package boundary notice is absent", 
     expectCode(() => packPackage({ packageRoot: staged.root, members, releaseInstant: instant }), "REQUIRED_TAR_MEMBER_MISSING");
   }
 });
+
+test("accepts exactly one canonical gzip member and no trailing bytes", () => {
+  const staged = temporaryPackage();
+  const packed = packPackage({ packageRoot: staged.root, members: staged.members, releaseInstant: instant });
+  expectCode(() => auditTgz(Buffer.concat([packed.tgz, Buffer.from([0])]), { releaseInstant: instant, expectedMembers: staged.members }), "INVALID_GZIP_STREAM");
+  expectCode(() => auditTgz(Buffer.concat([packed.tgz, canonicalGzip(Buffer.alloc(0))]), { releaseInstant: instant, expectedMembers: staged.members }), "INVALID_GZIP_STREAM");
+  const invalidCrc = Buffer.from(packed.tgz);
+  invalidCrc[invalidCrc.length - 8] ^= 1;
+  expectCode(() => auditTgz(invalidCrc, { releaseInstant: instant, expectedMembers: staged.members }), "INVALID_GZIP_STREAM");
+});
+
+test("rejects mixed-container and unknown classifications in the expected inner ledger before decoding", () => {
+  const staged = temporaryPackage();
+  const packed = packPackage({ packageRoot: staged.root, members: staged.members, releaseInstant: instant });
+  for (const originalClass of ["mixed-container", "unknown"] as const) {
+    const invalid = staged.members.map((member, index) => index === 0 ? { ...member, originalClass } : member);
+    expectCode(() => auditTgz(packed.tgz, { releaseInstant: instant, expectedMembers: invalid as never }), "INVALID_TAR_LEDGER");
+  }
+});
