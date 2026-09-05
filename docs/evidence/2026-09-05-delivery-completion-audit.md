@@ -2,6 +2,22 @@
 
 ## Latest frozen candidate — 08:30 UTC
 
+Independent operator completed in 150 seconds, unaided, with result
+`PASSED_AFTER_OUTPUT_PATH_RECOVERY`. Report at
+`/private/tmp/trajecta-customer-trial.HqMyt3/report.json`, SHA-256
+`90d0fc530abbff11527322e3bbe34093f28b89089f309a840168ca828fc3ad38`;
+installed acceptance evidence SHA-256
+`570be43e8e43e0ba8b920bc0120e732c944005063c2bcc3452e2c85837c81174`.
+Parent verified both hashes and inspected command exits and receipts. Install,
+doctor, demo, host, inspect, stale reject, current resume, exact retry and lookup
+completed using delivered files only. Two recoverable acceptance failures were
+preserved: `/tmp` symbolic-link output paths, then symbolic-link bundle path.
+Canonical `/private/tmp` paths succeeded without artifact edits. The guide also
+omits the SPKI DER fingerprint calculation command. These are disclosed UX
+limitations, not hidden clean-first-attempt claims. This proves an agent-operated
+trial, not human usability or demand. GitHub was rechecked and remains public;
+no push is authorized by this local result.
+
 - Reviewed implementation: `5adbfd697fdd1ae146adafb29cad5039797dd00a`.
   Scoped independent rereview approved both final onboarding fixes; no remaining
   Critical/Important finding in that wave. Report: SDD `final-rereview.md`.
