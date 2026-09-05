@@ -7,8 +7,10 @@ First complete recipe 1. Stay in the same test folder and run:
 ./node_modules/.bin/trajecta-beta resume ./trial-state/stale.json --state-root ./trial-state --accept
 ```
 
-Expected: inspection reports the old expected revision and the newer current
-revision. Resume prints a rejected receipt with `REVISION_CONFLICT` and exits
+Expected: inspection reports that the expected revision is `2` and the current revision is `3`.
+In a two-minute operator pass, this distinction was easy to miss; that was an
+observed misunderstanding, not a claim that the earlier guide labeled the expected
+revision as `3`. Resume prints a rejected receipt with `REVISION_CONFLICT` and exits
 with code 2. That exit code is the expected result, not a broken installation.
 The receipt's `observedRevisionBefore` and `observedRevisionAfter` are both 3.
 No work revision advances; a rejection receipt is deliberately saved for audit.

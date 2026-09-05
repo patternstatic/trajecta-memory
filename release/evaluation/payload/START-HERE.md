@@ -18,7 +18,23 @@ npm install --offline --ignore-scripts --package-lock=false --no-audit --no-fund
 
 Replace the archive path with your downloaded file. A successful demo prints STALE (revision 3 → 3), CURRENT (3 → 4), then RETRY with the same receipt and revision 4. This is an internal example, not your own project work. Use a new state directory for each demo.
 
-## 3. Check your own Git workspace
+## 3. Run the installed acceptance check
+
+Use the original downloaded ZIP, the separately unpacked bundle, and the SHA-256 pin and public key you obtained independently. Run the installed package from outside a source checkout. Both output paths must be fresh absolute paths whose parent folders already exist.
+
+```sh
+/absolute/path/to/test/node_modules/.bin/trajecta-beta verify-acceptance \
+  --archive /absolute/path/to/original-download.zip \
+  --pinned-zip-sha256 <independent64hex> \
+  --bundle-root /absolute/path/to/unpacked/trajecta-verified-resume-sdk-beta-0.1.0 \
+  --public-key /absolute/path/to/independent-public.pem \
+  --state-root /absolute/path/to/new-acceptance-state \
+  --evidence-dir /absolute/path/to/new-acceptance-evidence
+```
+
+A successful run prints `ACCEPTANCE_PASSED` and the evidence file path after all 14 automated behavioral checks pass. Acceptance item #15 remains an independent operator observation; the command does not simulate it. This evaluation result is not commercial approval and does not activate a sale.
+
+## 4. Check your own Git workspace
 
 From a local Git workspace with at least one commit, an attached branch and an `origin` remote, invoke the installed binary using its absolute path:
 

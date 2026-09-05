@@ -34,7 +34,18 @@
 </ul>
 <p>Receipts remain in <code>demo-state</code>. Use a new state-folder name for another trial. This isolated example is not evidence that your own project or an external AI completed work.</p>
 
-<h2>3. Check a local workspace</h2>
+<h2>3. Run the installed acceptance check</h2>
+<p>Use the original downloaded ZIP, the separately unpacked bundle, and the SHA-256 pin and public key you obtained independently. Run the installed package from outside a source checkout. Both output paths must be fresh absolute paths whose parent folders already exist.</p>
+<pre><code>/absolute/path/to/test/node_modules/.bin/trajecta-beta verify-acceptance \
+  --archive /absolute/path/to/original-download.zip \
+  --pinned-zip-sha256 &lt;independent64hex&gt; \
+  --bundle-root /absolute/path/to/unpacked/trajecta-verified-resume-sdk-beta-0.1.0 \
+  --public-key /absolute/path/to/independent-public.pem \
+  --state-root /absolute/path/to/new-acceptance-state \
+  --evidence-dir /absolute/path/to/new-acceptance-evidence</code></pre>
+<p>A successful run prints <code>ACCEPTANCE_PASSED</code> and the evidence file path after all 14 automated behavioral checks pass. Acceptance item #15 remains an independent operator observation; the command does not simulate it. This evaluation result is not commercial approval and does not activate a sale.</p>
+
+<h2>4. Check a local workspace</h2>
 <p>Open a Git workspace with at least one commit, an attached branch, and an <code>origin</code> remote. Invoke the installed command using its full path:</p>
 <pre><code>/absolute/path/to/test/node_modules/.bin/trajecta-beta doctor
 /absolute/path/to/test/node_modules/.bin/trajecta-beta host init --out target.json</code></pre>

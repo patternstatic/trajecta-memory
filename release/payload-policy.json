@@ -20,6 +20,8 @@
     "package/LICENSES/CORE-MODIFICATIONS.txt",
     "package/NOTICE",
     "package/beta/DEVELOPMENT-BOUNDARY.md",
+    "package/beta/src/acceptance-proof.js",
+    "package/beta/src/acceptance.js",
     "package/beta/src/args.js",
     "package/beta/src/canonical.js",
     "package/beta/src/cli.js",

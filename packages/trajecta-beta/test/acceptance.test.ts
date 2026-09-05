@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { generateKeyPairSync, createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -15,6 +15,7 @@ import type { SourceSnapshot } from "../../../tools/release-integrity/src/prefli
 
 const repository = path.resolve(import.meta.dirname, "../../..");
 const releaseInstant = "2026-09-05T00:00:00Z";
+const npmCli = path.resolve(path.dirname(process.execPath), "..", "lib", "node_modules", "npm", "bin", "npm-cli.js");
 
 function hash(bytes: Buffer): string { return createHash("sha256").update(bytes).digest("hex"); }
 
@@ -26,12 +27,13 @@ function sourceSnapshot(): SourceSnapshot {
   const stagedCore = policy.stagedPaths
     .filter((member: string) => member.startsWith("package/core/src/") && member.endsWith(".js"))
     .map((member: string) => `src/${member.slice("package/core/src/".length, -3)}.ts`);
-  const files = [
+  const files = [...new Set([
     "release/payload-policy.json", "release/trajecta-beta.package.json", "release/license-map.json",
     "release/evaluation/LICENSES/BETA-COMMERCIAL-TERMS.txt", "LICENSE", "NOTICE",
     "packages/trajecta-beta/DEVELOPMENT-BOUNDARY.md", "packages/trajecta-beta/bin/trajecta-beta",
+    "packages/trajecta-beta/src/acceptance.ts", "packages/trajecta-beta/src/acceptance-proof.ts",
     ...stagedBeta, ...stagedCore,
-  ].sort();
+  ])].sort();
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "trajecta-acceptance-snapshot-"));
   const entries = files.map(relative => {
     const bytes = fs.readFileSync(path.join(repository, relative));
@@ -73,14 +75,100 @@ function fixture(t: test.TestContext) {
   const unpacked = path.join(root, "unpacked");
   for (const member of readZip(bundle.zip, releaseInstant)) writeRegular(path.join(unpacked, ...member.path.split("/")), member.bytes, Number.parseInt(member.mode, 8));
   const bundleRoot = path.join(unpacked, BUNDLE_ROOT);
-  const installedPackageRoot = path.join(root, "caller", "node_modules", "@patternstatic", "trajecta-beta");
-  fs.cpSync(staged.packageRoot, installedPackageRoot, { recursive: true, preserveTimestamps: true });
-  for (const member of staged.members) fs.chmodSync(path.join(installedPackageRoot, member.path), Number.parseInt(member.mode, 8));
+  const caller = path.join(root, "caller"); fs.mkdirSync(caller);
+  fs.writeFileSync(path.join(caller, "package.json"), "{\"name\":\"acceptance-caller\",\"private\":true}\n", { mode: 0o600 });
+  const tgz = path.join(root, "trajecta-beta-0.1.0.tgz"); fs.writeFileSync(tgz, packed.tgz, { mode: 0o600 });
+  const npmUserConfig = path.join(root, "caller-user.npmrc"), npmGlobalConfig = path.join(root, "caller-global.npmrc");
+  const npmConfig = "offline=true\nignore-scripts=true\npackage-lock=false\naudit=false\nfund=false\nupdate-notifier=false\n";
+  fs.writeFileSync(npmUserConfig, npmConfig, { mode: 0o600 });
+  fs.writeFileSync(npmGlobalConfig, npmConfig, { mode: 0o600 });
+  const installEnvironment = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/(?:npm_config_|auth|proxy|registry)/i.test(key)));
+  execFileSync(process.execPath, [npmCli, "install", "--offline", "--ignore-scripts", "--package-lock=false", "--no-audit", "--no-fund", tgz], {
+    cwd: caller,
+    env: { ...installEnvironment, NPM_CONFIG_USERCONFIG: npmUserConfig, NPM_CONFIG_GLOBALCONFIG: npmGlobalConfig },
+    stdio: "ignore",
+  });
+  const installedPackageRoot = path.join(caller, "node_modules", "@patternstatic", "trajecta-beta");
   const publicKeyPath = path.join(root, "seller-public.pem"); fs.writeFileSync(publicKeyPath, publicKeyPem, { mode: 0o600 });
   const bin = path.join(installedPackageRoot, "bin", "trajecta-beta");
   assert.match(execFileSync(bin, ["version"], { encoding: "utf8" }), /0\.1\.0/);
-  return { root, bin, input: { archivePath, pinnedZipSha256: bundle.archiveSha256, bundleRoot, publicKeyPath, installedPackageRoot, bin } };
+  const outside = path.join(root, "outside-source-checkout"); fs.mkdirSync(outside);
+  const independentlyPinnedZipSha256 = hash(fs.readFileSync(archivePath));
+  assert.equal(independentlyPinnedZipSha256, bundle.archiveSha256);
+  return { root, outside, bin, input: { archivePath, pinnedZipSha256: independentlyPinnedZipSha256, bundleRoot, publicKeyPath, installedPackageRoot, bin } };
 }
+
+function acceptanceArgs(input: ReturnType<typeof fixture>["input"], stateRoot: string, evidenceDir: string): string[] {
+  return [
+    "verify-acceptance",
+    "--archive", input.archivePath,
+    "--pinned-zip-sha256", input.pinnedZipSha256,
+    "--bundle-root", input.bundleRoot,
+    "--public-key", input.publicKeyPath,
+    "--state-root", stateRoot,
+    "--evidence-dir", evidenceDir,
+  ];
+}
+
+function runInstalled(bin: string, cwd: string, args: string[]) {
+  return spawnSync(bin, args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+}
+
+test("evaluation guides show the six-flag installed command and the exact stale revision distinction", () => {
+  for (const name of ["START-HERE.md", "START-HERE.html"]) {
+    const guide = fs.readFileSync(path.join(repository, "release", "evaluation", "payload", name), "utf8");
+    assert.match(guide, /trajecta-beta verify-acceptance/);
+    const commandStart = guide.indexOf("trajecta-beta verify-acceptance");
+    const commandEnd = guide.indexOf(name.endsWith(".md") ? "```" : "</code>", commandStart);
+    const command = guide.slice(commandStart, commandEnd);
+    for (const flag of ["--archive", "--pinned-zip-sha256", "--bundle-root", "--public-key", "--state-root", "--evidence-dir"]) {
+      assert.equal(command.split(flag).length - 1, 1, `${name}: ${flag}`);
+    }
+    assert.match(guide, /independent/i);
+    assert.match(guide, /new[^\n<]*(?:state|evidence)/i);
+    assert.match(guide, /not[^\n<]*(?:commercial approval|sale)/i);
+  }
+  const stale = fs.readFileSync(path.join(repository, "release", "evaluation", "payload", "recipes", "02-stale-rejection.md"), "utf8");
+  assert.match(stale, /expected revision is `?2`?[^\n]*current revision is `?3`?/i);
+  assert.match(stale, /observed misunderstanding/i);
+  assert.doesNotMatch(stale, /original (?:text|guide|instructions) said (?:revision )?3/i);
+});
+
+test("installed verify-acceptance rejects malformed flags before writes and runs the authenticated package outside source", (t) => {
+  const f = fixture(t);
+  for (const [label, mutate] of [
+    ["missing", (args: string[]) => args.slice(0, -2)],
+    ["duplicate", (args: string[]) => [...args, "--archive", f.input.archivePath]],
+    ["unknown", (args: string[]) => [...args, "--unknown", "value"]],
+  ] as const) {
+    const stateRoot = path.join(f.root, `${label}-state`), evidenceDir = path.join(f.root, `${label}-evidence`);
+    const result = runInstalled(f.bin, f.outside, mutate(acceptanceArgs(f.input, stateRoot, evidenceDir)));
+    assert.equal(result.status, 2, result.stderr);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /^USAGE: [^\n]+\nNext: [^\n]+\n$/);
+    assert.equal(fs.existsSync(stateRoot), false); assert.equal(fs.existsSync(evidenceDir), false);
+  }
+
+  const rejectedState = path.join(f.root, "rejected-state"), rejectedEvidence = path.join(f.root, "rejected-evidence");
+  const rejected = runInstalled(f.bin, f.outside, acceptanceArgs({ ...f.input, pinnedZipSha256: "0".repeat(64) }, rejectedState, rejectedEvidence));
+  assert.equal(rejected.status, 2, rejected.stderr);
+  assert.match(rejected.stderr, /^ARCHIVE_DIGEST_MISMATCH: [^\n]+\nNext: [^\n]+\n$/);
+  assert.doesNotMatch(rejected.stderr, new RegExp(f.root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.doesNotMatch(rejected.stderr, /capability:/);
+  assert.equal(fs.existsSync(rejectedState), false); assert.equal(fs.existsSync(rejectedEvidence), false);
+
+  const stateRoot = path.join(f.root, "command-state"), evidenceDir = path.join(f.root, "command-evidence");
+  const result = runInstalled(f.bin, f.outside, acceptanceArgs(f.input, stateRoot, evidenceDir));
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, "");
+  const summary = JSON.parse(result.stdout);
+  assert.deepEqual(summary, { code: "ACCEPTANCE_PASSED", evidencePath: path.join(evidenceDir, "evidence.json") });
+  const evidence = JSON.parse(fs.readFileSync(summary.evidencePath, "utf8"));
+  const automatedChecks = Object.entries(evidence.checks).filter(([name]) => name !== "installedCommandsPassed");
+  assert.equal(automatedChecks.length, 14);
+  assert.ok(automatedChecks.every(([, passed]) => passed === true));
+  assert.deepEqual(evidence.manualIntervention, []);
+});
 
 test("production proof runs installed CLI scenarios twice with exact durable receipts", async (t) => {
   const f = fixture(t);

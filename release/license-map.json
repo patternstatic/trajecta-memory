@@ -6,6 +6,8 @@
     { "path": "LICENSES/CORE-MODIFICATIONS.txt", "originalClass": "notice" },
     { "path": "NOTICE", "originalClass": "notice" },
     { "path": "beta/DEVELOPMENT-BOUNDARY.md", "originalClass": "documentation" },
+    { "path": "beta/src/acceptance-proof.js", "originalClass": "commercial-beta" },
+    { "path": "beta/src/acceptance.js", "originalClass": "commercial-beta" },
     { "path": "beta/src/args.js", "originalClass": "commercial-beta" },
     { "path": "beta/src/canonical.js", "originalClass": "commercial-beta" },
     { "path": "beta/src/cli.js", "originalClass": "commercial-beta" },
