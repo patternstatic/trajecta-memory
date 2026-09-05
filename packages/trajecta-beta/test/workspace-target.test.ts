@@ -411,6 +411,84 @@ test("durable journal rejects empty opaque record identifiers", () => {
   }
 });
 
+test("durable journal rejects extra record/workspace keys and non-increasing timestamps", () => {
+  const fixture = makeWorkspace();
+  const now = new Date("2026-09-05T00:00:00.000Z");
+  try {
+    const observation = observeWorkspace(fixture.root, fixture.stateRoot);
+    const registry = new TargetRegistry({ stateRoot: observation.stateRoot, clock: () => now });
+    const cards = [registry.issue(observation), registry.issue(observation), registry.issue(observation), registry.issue(observation)];
+    const changes = [
+      (record: Record<string, unknown>) => ({ ...record, unexpected: true }),
+      (record: Record<string, unknown>) => ({ ...record, workspace: { ...(record.workspace as Record<string, unknown>), unexpected: true } }),
+      (record: Record<string, unknown>) => ({ ...record, createdAt: "2026-09-05T00:00:00.000Z", expiresAt: "2026-09-05T00:00:00.000Z" }),
+      (record: Record<string, unknown>) => ({ ...record, createdAt: "2026-09-05T00:00:01.000Z", expiresAt: "2026-09-05T00:00:00.000Z" }),
+    ];
+    for (let index = 0; index < cards.length; index++) {
+      const file = targetRecordFile(observation, cards[index]!.targetId);
+      writeJournal(file, [changes[index]!(journalRecords(file)[0]!)]);
+      assert.throws(() => registry.lookup(cards[index]!, now), errorCode("OPERATION_IN_DOUBT"));
+    }
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+    fs.rmSync(fixture.stateRoot, { recursive: true, force: true });
+  }
+});
+
+test("replacing a persistent lock after descriptor acquisition fails closed", () => {
+  const fixture = makeWorkspace();
+  const now = new Date("2026-09-05T00:00:00.000Z");
+  try {
+    const observation = observeWorkspace(fixture.root, fixture.stateRoot);
+    const issuer = registryFor(observation.stateRoot, now);
+    const card = issuer.issue(observation);
+    const lock = targetLockFile(observation, card.targetId);
+    const orphan = `${lock}.orphan`;
+    const registry = new TargetRegistry({
+      stateRoot: observation.stateRoot,
+      clock: () => now,
+      onTargetDescriptorsAcquired: () => {
+        fs.renameSync(lock, orphan);
+        fs.writeFileSync(lock, fs.readFileSync(orphan), { mode: 0o600 });
+      },
+    });
+    assert.throws(() => registry.reserve(card, "operation:owner", "a".repeat(64), now), errorCode("OPERATION_IN_DOUBT"));
+    assert.equal(journalRecords(targetRecordFile(observation, card.targetId)).length, 1);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+    fs.rmSync(fixture.stateRoot, { recursive: true, force: true });
+  }
+});
+
+test("replacing a journal after append cannot be reported or treated as committed", () => {
+  const fixture = makeWorkspace();
+  const now = new Date("2026-09-05T00:00:00.000Z");
+  try {
+    const observation = observeWorkspace(fixture.root, fixture.stateRoot);
+    const issuer = registryFor(observation.stateRoot, now);
+    const card = issuer.issue(observation);
+    const journal = targetRecordFile(observation, card.targetId);
+    const issuedBytes = fs.readFileSync(journal);
+    const orphan = `${journal}.orphan`;
+    const registry = new TargetRegistry({
+      stateRoot: observation.stateRoot,
+      clock: () => now,
+      onAfterJournalAppend: () => {
+        fs.renameSync(journal, orphan);
+        fs.writeFileSync(journal, issuedBytes, { mode: 0o600 });
+      },
+    });
+    assert.throws(() => registry.reserve(card, "operation:owner", "a".repeat(64), now), errorCode("OPERATION_IN_DOUBT"));
+    assert.equal(journalRecords(journal).length, 1);
+    assert.equal(journalRecords(orphan).length, 2);
+    registryFor(observation.stateRoot, now).reserve(card, "operation:recovered", "b".repeat(64), now);
+    assert.equal(journalRecords(journal).at(-1)!.operationId, "operation:recovered");
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+    fs.rmSync(fixture.stateRoot, { recursive: true, force: true });
+  }
+});
+
 test("same-receipt consume waits for a held kernel lock then returns idempotently", async () => {
   const fixture = makeWorkspace();
   const now = new Date("2026-09-05T00:00:00.000Z");

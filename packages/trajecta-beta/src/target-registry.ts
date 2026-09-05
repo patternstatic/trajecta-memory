@@ -29,6 +29,8 @@ export interface TargetRegistryOptions {
   randomBytes?: (size: number) => Uint8Array;
   onTargetLockAcquired?: (transition: "reserve" | "consume", targetId: string) => void;
   onBeforeTargetOpen?: (kind: "lock" | "journal", file: string) => void;
+  onTargetDescriptorsAcquired?: (targetId: string) => void;
+  onAfterJournalAppend?: (targetId: string) => void;
 }
 
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -55,7 +57,12 @@ function boundedText(value: unknown, maximum: number): value is string {
 }
 
 function timestamp(value: unknown): value is string {
-  return boundedText(value, 64) && /^\d{4}-\d{2}-\d{2}T/.test(value) && !Number.isNaN(Date.parse(value));
+  return boundedText(value, 64) && /^\d{4}-\d{2}-\d{2}T/.test(value) && !Number.isNaN(Date.parse(value)) && new Date(value).toISOString() === value;
+}
+
+function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  const actual = Object.keys(value);
+  return actual.length === keys.length && keys.every((key) => key in value);
 }
 
 function sameHash(left: string, right: string): boolean {
@@ -82,10 +89,11 @@ function validRecord(value: unknown): value is TargetRecordV1 {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
   const keys = ["schema", "targetId", "capabilityHash", "registryFingerprint", "workspace", "createdAt", "expiresAt", "state", "operationId", "attemptDigest", "receiptId"];
-  if (Object.keys(record).length !== keys.length || keys.some((key) => !(key in record))) return false;
+  if (!exactKeys(record, keys)) return false;
   if (record.schema !== "trajecta.local-target-record/v1" || !opaqueId(record.targetId, "target:") || typeof record.capabilityHash !== "string" || !SHA256.test(record.capabilityHash) || typeof record.registryFingerprint !== "string" || !SHA256.test(record.registryFingerprint) || !timestamp(record.createdAt) || !timestamp(record.expiresAt)) return false;
   const workspace = record.workspace as Record<string, unknown>;
-  if (!workspace || typeof workspace !== "object" || Array.isArray(workspace)
+  if (Date.parse(record.createdAt) >= Date.parse(record.expiresAt)) return false;
+  if (!workspace || typeof workspace !== "object" || Array.isArray(workspace) || !exactKeys(workspace, ["repository", "repositoryFingerprint", "stateRootFingerprint", "branch"])
     || !boundedText(workspace.repository, 240)
     || typeof workspace.repositoryFingerprint !== "string" || !SHA256.test(workspace.repositoryFingerprint)
     || typeof workspace.stateRootFingerprint !== "string" || !SHA256.test(workspace.stateRootFingerprint)
@@ -131,6 +139,8 @@ export class TargetRegistry {
   private readonly registryFingerprint: string;
   private readonly onTargetLockAcquired: ((transition: "reserve" | "consume", targetId: string) => void) | undefined;
   private readonly onBeforeTargetOpen: ((kind: "lock" | "journal", file: string) => void) | undefined;
+  private readonly onTargetDescriptorsAcquired: ((targetId: string) => void) | undefined;
+  private readonly onAfterJournalAppend: ((targetId: string) => void) | undefined;
 
   constructor(options: TargetRegistryOptions) {
     if (process.platform !== "darwin") throw betaError("CAPABILITY_UNAVAILABLE", "Target journaling requires supported macOS kernel flags.");
@@ -141,6 +151,8 @@ export class TargetRegistry {
     this.registryFingerprint = sha256(`trajecta.local-registry/v1\0${this.stateRootFingerprint}`);
     this.onTargetLockAcquired = options.onTargetLockAcquired;
     this.onBeforeTargetOpen = options.onBeforeTargetOpen;
+    this.onTargetDescriptorsAcquired = options.onTargetDescriptorsAcquired;
+    this.onAfterJournalAppend = options.onAfterJournalAppend;
   }
 
   issue(observation: WorkspaceObservation, now = this.clock()): LocalWorkspaceTargetCardV1 {
@@ -191,7 +203,7 @@ export class TargetRegistry {
       }
       if (record.state === "consumed") throw betaError("TARGET_CONSUMED", "The local target has already been consumed.");
       this.requireFresh(record, now);
-      this.appendTransition(journal, { ...record, state: "reserved", operationId, attemptDigest });
+      this.appendTransition(card.targetId, journal, { ...record, state: "reserved", operationId, attemptDigest });
     });
   }
 
@@ -204,7 +216,7 @@ export class TargetRegistry {
         throw betaError("TARGET_CONSUMED", "The local target has already been consumed.");
       }
       if (record.state !== "reserved" || record.operationId !== operationId) throw betaError("TARGET_CONSUMED", "The local target is not reserved by this operation.");
-      this.appendTransition(journal, { ...record, state: "consumed", receiptId });
+      this.appendTransition(card.targetId, journal, { ...record, state: "consumed", receiptId });
     });
   }
 
@@ -230,7 +242,12 @@ export class TargetRegistry {
     try {
       if (transition) this.onTargetLockAcquired?.(transition, card.targetId);
       journal = this.openJournal(card.targetId);
+      this.onTargetDescriptorsAcquired?.(card.targetId);
+      this.assertBoundTargetDescriptor(lock, this.lockFile(card.targetId), "Target lock");
+      this.assertBoundTargetDescriptor(journal, this.journalFile(card.targetId), "Target journal");
       action(this.readVerified(card, journal), journal);
+      this.assertBoundTargetDescriptor(lock, this.lockFile(card.targetId), "Target lock");
+      this.assertBoundTargetDescriptor(journal, this.journalFile(card.targetId), "Target journal");
     } finally {
       if (journal >= 0) closeSync(journal);
       closeSync(lock);
@@ -300,6 +317,21 @@ export class TargetRegistry {
     if (!state.isFile() || (state.mode & 0o777) !== 0o600) inDoubt(`${label} is not a private regular file.`);
   }
 
+  private assertBoundTargetDescriptor(descriptor: number, file: string, label: string): void {
+    this.assertRegistryDirectories();
+    const opened = fstatSync(descriptor);
+    this.assertOpenPrivateFile(descriptor, label);
+    let named;
+    try {
+      named = lstatSync(file);
+    } catch {
+      inDoubt(`${label} disappeared after it was opened.`);
+    }
+    if (named.isSymbolicLink() || !named.isFile() || (named.mode & 0o777) !== 0o600 || named.dev !== opened.dev || named.ino !== opened.ino) {
+      inDoubt(`${label} no longer matches its opened descriptor.`);
+    }
+  }
+
   private readVerified(card: LocalWorkspaceTargetCardV1, descriptor: number): TargetRecordV1 {
     const bytes = this.readJournalBytes(descriptor);
     const records: TargetRecordV1[] = [];
@@ -335,11 +367,12 @@ export class TargetRegistry {
     return bytes;
   }
 
-  private appendTransition(descriptor: number, record: TargetRecordV1): void {
+  private appendTransition(targetId: string, descriptor: number, record: TargetRecordV1): void {
     const before = fstatSync(descriptor);
     const bytes = Buffer.from(`${JSON.stringify(record)}\n`, "utf8");
     writeAllAt(descriptor, bytes, before.size);
     fsyncSync(descriptor);
+    this.onAfterJournalAppend?.(targetId);
   }
 
   private assertCard(card: LocalWorkspaceTargetCardV1): void {
