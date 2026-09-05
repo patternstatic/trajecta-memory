@@ -87,6 +87,11 @@ function assertPacket(packet: unknown): asserts packet is TransferPacket {
   }
   if (packet.intendedFor !== "local") throw betaError("TARGET_MISMATCH", "Local resume envelopes require a packet intended for local use.");
   if (packet.activeBranch === null) throw betaError("BRANCH_MISMATCH", "Local resume envelopes require an active branch.");
+  for (const value of [packet.packetId, packet.work.id, packet.activeBranch.id]) assertPublicReceiptIdentity(value);
+}
+
+function assertPublicReceiptIdentity(value: string): void {
+  if (value.startsWith("capability:")) unsupported("Receipt identities must not contain private capability identities.");
 }
 
 function sortedUnique(values: readonly string[]): string[] {
@@ -95,7 +100,10 @@ function sortedUnique(values: readonly string[]): string[] {
 
 function assertReceiptReferences(values: readonly string[], label: string) {
   if (values.length > 20) unsupported(`${label} must contain at most 20 unique values.`);
-  values.forEach((value, index) => opaqueId(value, `${label} ${index + 1}`));
+  values.forEach((value, index) => {
+    opaqueId(value, `${label} ${index + 1}`);
+    assertPublicReceiptIdentity(value);
+  });
 }
 
 export function deriveLocalResumeReceiptReferences(packet: Pick<TransferPacket, "recentDeltas">): {

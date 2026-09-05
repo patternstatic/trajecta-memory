@@ -7,9 +7,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { TrajectaStore } from "../../../src/index.ts";
-import { buildLocalResumeEnvelope } from "../src/envelope.ts";
+import { buildLocalResumeEnvelope, envelopePayload, readLocalResumeEnvelopeBytes } from "../src/envelope.ts";
 import * as kernelBoundary from "../src/kernel-port.ts";
 import { runCli } from "../src/cli.ts";
+import { canonicalJson } from "../src/canonical.ts";
+import { validLocalResumeReceipt } from "../src/receipt-store.ts";
+import { OperationJournal } from "../src/operation-journal.ts";
+import { finalizePacketBudget } from "./helpers.ts";
 
 const executable = fileURLToPath(new URL("../bin/trajecta-beta", import.meta.url));
 function run(cwd: string, ...args: string[]) {
@@ -241,4 +245,57 @@ test("unexpected internal failures are exit one with no raw diagnostic leak", as
   });
   assert.equal(status, 1); safe(stderr);
   assert.match(stderr, /^INTERNAL_ERROR: [^\n]+\nNext: [^\n]+\n$/);
+});
+
+for (const state of ["current", "stale"] as const) for (const field of ["provenance", "packetId"] as const) test(`${state} capability ${field} rejects before inspect or resume can create output or state`, t => {
+  const root = fixture(t); assert.equal(run(root, "host", "init").status, 0);
+  const f = seed(root), payload = envelopePayload(f.envelope);
+  if (field === "packetId") payload.packet.packetId = f.envelope.target.capability;
+  else payload.packet.recentDeltas[0]!.provenance = [f.envelope.target.capability];
+  finalizePacketBudget(payload.packet);
+  fs.writeFileSync(f.file, JSON.stringify(buildLocalResumeEnvelope(payload)));
+  if (state === "stale") f.store.capture({ operationId: "operation:advance", workId: f.workId, expectedRevision: 2,
+    surface: { kind: "cloud", name: "Fixture", session: "cloud:fixture" }, kind: "decision", summary: "Advance" });
+  const before = tree(root);
+  failure(run(root, "inspect", f.file), "UNSUPPORTED_SCHEMA");
+  assert.deepEqual(tree(root), before);
+  failure(run(root, "resume", f.file, "--accept"), "UNSUPPORTED_SCHEMA");
+  assert.deepEqual(tree(root), before);
+  failure(run(root, "resume", f.file), "UNSUPPORTED_SCHEMA");
+  assert.deepEqual(tree(root), before);
+  assert.equal(fs.existsSync(path.join(root, ".trajecta-beta", "receipts")), false);
+});
+
+for (const field of ["evidence", "workId", "branchId"] as const) test(`capability ${field} is rejected by envelope validation`, t => {
+  const root = fixture(t); assert.equal(run(root, "host", "init").status, 0);
+  const f = seed(root), payload = envelopePayload(f.envelope);
+  if (field === "evidence") payload.packet.recentDeltas[0]!.id = f.envelope.target.capability;
+  else if (field === "workId") payload.packet.work.id = f.envelope.target.capability;
+  else payload.packet.activeBranch!.id = f.envelope.target.capability;
+  finalizePacketBudget(payload.packet);
+  assert.throws(() => readLocalResumeEnvelopeBytes(Buffer.from(JSON.stringify(buildLocalResumeEnvelope(payload)))),
+    (error: any) => error.code === "UNSUPPORTED_SCHEMA");
+});
+
+for (const field of ["provenance", "evidence", "packetId", "workId", "branchId"] as const) test(`stored capability ${field} fails receipt validation and lookup without stdout`, t => {
+  const root = fixture(t); assert.equal(run(root, "host", "init").status, 0);
+  const f = seed(root), accepted = run(root, "resume", f.file, "--accept");
+  assert.equal(accepted.status, 0, accepted.stderr);
+  const receipt = JSON.parse(accepted.stdout);
+  const value = field === "provenance" || field === "evidence" ? [f.envelope.target.capability] : f.envelope.target.capability;
+  receipt[field] = value;
+  assert.equal(validLocalResumeReceipt(receipt), false);
+  const file = path.join(root, ".trajecta-beta", "receipts", `${createHash("sha256").update("operation:cli").digest("hex")}.json`);
+  fs.writeFileSync(file, `${canonicalJson(receipt)}\n`);
+  const before = tree(root);
+  failure(run(root, "receipt", "operation:cli"), "OPERATION_IN_DOUBT");
+  assert.deepEqual(tree(root), before);
+  const operationFile = path.join(root, ".trajecta-beta", "operations", path.basename(file));
+  const operation = JSON.parse(fs.readFileSync(operationFile, "utf8"));
+  operation.receipt[field] = value;
+  fs.writeFileSync(operationFile, JSON.stringify(operation));
+  const journalBefore = tree(root);
+  assert.throws(() => new OperationJournal({ stateRoot: path.join(root, ".trajecta-beta") }).lookup("operation:cli"),
+    (error: any) => error.code === "OPERATION_IN_DOUBT");
+  assert.deepEqual(tree(root), journalBefore);
 });

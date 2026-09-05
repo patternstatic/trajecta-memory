@@ -19,12 +19,13 @@ export function exactObject(value: unknown, keys: readonly string[]): value is R
   return !!value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
 }
 function revision(value: unknown): value is number { return Number.isSafeInteger(value) && (value as number) >= 0; }
-function references(value: unknown): boolean { return Array.isArray(value) && value.length <= 20 && value.every((item, i) => validOpaqueId(item) && (i === 0 || value[i - 1] < item)); }
+function publicReceiptId(value: unknown): value is string { return validOpaqueId(value) && !value.startsWith("capability:"); }
+function references(value: unknown): boolean { return Array.isArray(value) && value.length <= 20 && value.every((item, i) => publicReceiptId(item) && (i === 0 || value[i - 1] < item)); }
 
 export function validLocalResumeReceipt(value: unknown): value is LocalResumeReceiptV1 {
   if (!exactObject(value, ["schema", "receiptId", "envelopeId", "operationId", "attemptDigest", "outcome", "code", "targetId", "repositoryFingerprint", "stateRootFingerprint", "workId", "branchId", "packetId", "expectedRevision", "observedRevisionBefore", "observedRevisionAfter", "provenance", "evidence", "createdAt"])) return false;
-  if (value.schema !== "trajecta.local-resume-receipt/v1" || !validOpaqueId(value.receiptId, "receipt") || !validOpaqueId(value.envelopeId, "envelope") || !validOpaqueId(value.operationId, "operation") || !validOpaqueId(value.targetId, "target") || !validOpaqueId(value.workId) || !validOpaqueId(value.packetId)
-    || (value.branchId !== null && !validOpaqueId(value.branchId)) || !validDigest(value.attemptDigest) || !validDigest(value.repositoryFingerprint) || !validDigest(value.stateRootFingerprint)
+  if (value.schema !== "trajecta.local-resume-receipt/v1" || !validOpaqueId(value.receiptId, "receipt") || !validOpaqueId(value.envelopeId, "envelope") || !validOpaqueId(value.operationId, "operation") || !validOpaqueId(value.targetId, "target") || !publicReceiptId(value.workId) || !publicReceiptId(value.packetId)
+    || (value.branchId !== null && !publicReceiptId(value.branchId)) || !validDigest(value.attemptDigest) || !validDigest(value.repositoryFingerprint) || !validDigest(value.stateRootFingerprint)
     || !revision(value.expectedRevision) || (value.observedRevisionBefore !== null && !revision(value.observedRevisionBefore)) || (value.observedRevisionAfter !== null && !revision(value.observedRevisionAfter))
     || !references(value.provenance) || !references(value.evidence) || !validTimestamp(value.createdAt)) return false;
   if (value.outcome === "accepted") return value.code === "RESUMED" && value.branchId !== null && value.observedRevisionBefore === value.expectedRevision && value.observedRevisionAfter === value.expectedRevision + 1;
