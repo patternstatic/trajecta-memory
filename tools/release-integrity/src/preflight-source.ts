@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { TextDecoder } from "node:util";
 import { sha256Hex } from "./canonical.ts";
 import { parseCommitDigest } from "./contracts.ts";
 import { releaseError } from "./errors.ts";
@@ -64,12 +65,63 @@ function gitEnvironment(): { environment: NodeJS.ProcessEnv; cleanup: () => void
   return { environment, cleanup: () => fs.rmSync(path.dirname(emptyGlobalConfig), { recursive: true, force: true, maxRetries: 2 }) };
 }
 
+function noFollowText(file: string, label: string): string {
+  let expected: fs.Stats;
+  try { expected = fs.lstatSync(file); } catch { return releaseError("INVALID_GIT_DIR", `${label} is missing.`); }
+  if (!expected.isFile() || expected.isSymbolicLink() || expected.size === 0 || expected.size > 4096 || (expected.mode & 0o133) !== 0 || (expected.mode & 0o400) === 0) return releaseError("INVALID_GIT_DIR", `${label} must be a bounded no-follow regular file.`);
+  const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0);
+  let descriptor: number | undefined;
+  try {
+    descriptor = fs.openSync(file, flags);
+    const actual = fs.fstatSync(descriptor);
+    if (!actual.isFile() || actual.dev !== expected.dev || actual.ino !== expected.ino || actual.size !== expected.size || (actual.mode & 0o777) !== (expected.mode & 0o777)) return releaseError("INVALID_GIT_DIR", `${label} changed while being read.`);
+    const bytes = fs.readFileSync(descriptor);
+    const after = fs.fstatSync(descriptor);
+    if (after.dev !== expected.dev || after.ino !== expected.ino || after.size !== expected.size || (after.mode & 0o777) !== (expected.mode & 0o777)) return releaseError("INVALID_GIT_DIR", `${label} changed while being read.`);
+    try { return new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
+    catch { return releaseError("INVALID_GIT_DIR", `${label} must be UTF-8.`); }
+  } finally {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
+  }
+}
+
+function noFollowDirectory(directory: string, label: string): string {
+  let stat: fs.Stats;
+  try { stat = fs.lstatSync(directory); } catch { return releaseError("INVALID_GIT_DIR", `${label} is missing.`); }
+  if (!stat.isDirectory() || stat.isSymbolicLink()) return releaseError("INVALID_GIT_DIR", `${label} must be a no-follow directory.`);
+  return directory;
+}
+
+function resolvePointer(base: string, pointer: string, label: string): string {
+  if (!/^[^\r\n\0]+$/.test(pointer)) return releaseError("INVALID_GIT_DIR", `${label} pointer is malformed.`);
+  return path.resolve(base, pointer);
+}
+
+function resolveLinkedGitDirectory(sourceRoot: string, pointerFile: string): string {
+  const pointer = noFollowText(pointerFile, ".git pointer");
+  const matched = /^gitdir: ([^\r\n\0]+)\n$/.exec(pointer);
+  if (!matched) return releaseError("INVALID_GIT_DIR", ".git pointer must contain exactly one gitdir line.");
+  const gitDir = noFollowDirectory(resolvePointer(path.dirname(pointerFile), matched[1], ".git"), "linked gitdir");
+  const worktreePointer = noFollowText(path.join(gitDir, "gitdir"), "linked gitdir metadata");
+  if (!/^[^\r\n\0]+\n$/.test(worktreePointer)) return releaseError("INVALID_GIT_DIR", "Linked gitdir metadata must contain exactly one worktree path.");
+  const boundWorktreeFile = resolvePointer(gitDir, worktreePointer.slice(0, -1), "linked gitdir metadata");
+  if (boundWorktreeFile !== pointerFile) return releaseError("INVALID_GIT_DIR", "Linked gitdir metadata is not bound to this worktree.");
+  const commonPointer = noFollowText(path.join(gitDir, "commondir"), "linked common-dir metadata");
+  if (!/^[^\r\n\0]+\n$/.test(commonPointer)) return releaseError("INVALID_GIT_DIR", "Linked common-dir metadata must contain exactly one path.");
+  const commonDir = noFollowDirectory(resolvePointer(gitDir, commonPointer.slice(0, -1), "linked common-dir metadata"), "linked common gitdir");
+  const relative = path.relative(commonDir, gitDir);
+  if (!relative || path.isAbsolute(relative) || relative.split(path.sep)[0] !== "worktrees" || relative.split(path.sep).some((part) => part === ".." || part.length === 0)) return releaseError("INVALID_GIT_DIR", "Linked gitdir is outside its common worktree metadata.");
+  return gitDir;
+}
+
 function resolveGitDirectory(sourceRoot: string): string {
   const candidate = path.join(sourceRoot, ".git");
   let stat: fs.Stats;
   try { stat = fs.lstatSync(candidate); } catch { return releaseError("INVALID_GIT_DIR", "Source root must contain a regular .git directory."); }
-  if (!stat.isDirectory() || stat.isSymbolicLink()) return releaseError("INVALID_GIT_DIR", "Source root must contain a no-follow .git directory.");
-  return candidate;
+  if (stat.isSymbolicLink()) return releaseError("INVALID_GIT_DIR", "Source root .git may not be a symbolic link.");
+  if (stat.isDirectory()) return candidate;
+  if (stat.isFile()) return resolveLinkedGitDirectory(sourceRoot, candidate);
+  return releaseError("INVALID_GIT_DIR", "Source root must contain a no-follow .git directory or linked-worktree pointer.");
 }
 
 function runGit(gitBin: string, context: GitContext, args: string[]): Buffer {

@@ -39,6 +39,11 @@ function assertNoSnapshots(root: string) {
   assert.equal(fs.readdirSync(root).filter((name) => name.startsWith("trajecta-release-snapshot-")).length, 0);
 }
 
+function removeLinkedWorktree(repository: string, linked: string) {
+  try { command("git", ["worktree", "remove", "--force", linked], repository); }
+  finally { fs.rmSync(linked, { recursive: true, force: true }); }
+}
+
 test("preflight freezes only the clean commit-tree allowlist into immutable outside-source bytes", () => {
   // Would fail if construction could read a mutable repository rather than the verified snapshot.
   const value = fixture();
@@ -147,4 +152,62 @@ test("literal policy roots do not widen status scanning to unrelated ignored-too
     assert.deepEqual(snapshot.entries.map((entry) => entry.path), ["LICENSE"]);
     fs.rmSync(snapshot.root, { recursive: true, force: true });
   } finally { fs.rmSync(value.root, { recursive: true, force: true }); }
+});
+
+test("preflight accepts a standard linked Git worktree and the current linked worktree with exact metadata binding", () => {
+  // Would fail if a valid .git gitdir pointer were treated as a directory-only repository or if metadata were not tied to its worktree.
+  const repository = fixture();
+  const linked = fs.mkdtempSync(path.join(os.tmpdir(), "trajecta-linked-worktree-"));
+  fs.rmSync(linked, { recursive: true, force: true });
+  try {
+    command("git", ["worktree", "add", "--detach", linked, repository.commit], repository.root);
+    const snapshot = preflightSource({ sourceRoot: linked, gitBin: gitBin(), buildCommit: repository.commit, policy: repository.policy });
+    assert.deepEqual(snapshot.entries.map((entry) => entry.path), ["input/nested/two.txt", "input/one.txt"]);
+    fs.rmSync(snapshot.root, { recursive: true, force: true });
+    const currentRoot = process.cwd();
+    const currentSnapshot = preflightSource({ sourceRoot: currentRoot, gitBin: gitBin(), buildCommit: command(gitBin(), ["rev-parse", "HEAD"], currentRoot), policy: { schema: "trajecta.release-payload-policy/v1", sourceRoots: ["LICENSE"], stagedPaths: [], exclusionList: [] } });
+    assert.deepEqual(currentSnapshot.entries.map((entry) => entry.path), ["LICENSE"]);
+    fs.rmSync(currentSnapshot.root, { recursive: true, force: true });
+  } finally {
+    removeLinkedWorktree(repository.root, linked);
+    fs.rmSync(repository.root, { recursive: true, force: true });
+  }
+});
+
+test("preflight rejects symlinked, malformed, and unrelated .git pointer files", () => {
+  // Would fail if an attacker could substitute a pointer that targets another repository or smuggle extra metadata lines.
+  for (const pointer of ["gitdir: ../outside\nextra\n", "gitdir: ../outside\n"]) {
+    const value = fixture();
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "trajecta-unrelated-git-"));
+    try {
+      fs.rmSync(path.join(value.root, ".git"), { recursive: true, force: true });
+      fs.writeFileSync(path.join(value.root, ".git"), pointer, { mode: 0o644 });
+      assert.throws(() => preflightSource({ sourceRoot: value.root, gitBin: gitBin(), buildCommit: value.commit, policy: value.policy }));
+    } finally {
+      fs.rmSync(value.root, { recursive: true, force: true });
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  }
+  const linked = fixture();
+  try {
+    const pointer = path.join(linked.root, ".git");
+    fs.rmSync(pointer, { recursive: true, force: true });
+    fs.symlinkSync(path.join(linked.root, "input", "one.txt"), pointer);
+    assert.throws(() => preflightSource({ sourceRoot: linked.root, gitBin: gitBin(), buildCommit: linked.commit, policy: linked.policy }));
+  } finally { fs.rmSync(linked.root, { recursive: true, force: true }); }
+  const victim = fixture();
+  const unrelated = fixture();
+  const unrelatedWorktree = fs.mkdtempSync(path.join(os.tmpdir(), "trajecta-unrelated-worktree-"));
+  fs.rmSync(unrelatedWorktree, { recursive: true, force: true });
+  try {
+    command("git", ["worktree", "add", "--detach", unrelatedWorktree, unrelated.commit], unrelated.root);
+    const unrelatedPointer = fs.readFileSync(path.join(unrelatedWorktree, ".git"));
+    fs.rmSync(path.join(victim.root, ".git"), { recursive: true, force: true });
+    fs.writeFileSync(path.join(victim.root, ".git"), unrelatedPointer, { mode: 0o644 });
+    assert.throws(() => preflightSource({ sourceRoot: victim.root, gitBin: gitBin(), buildCommit: victim.commit, policy: victim.policy }));
+  } finally {
+    removeLinkedWorktree(unrelated.root, unrelatedWorktree);
+    fs.rmSync(victim.root, { recursive: true, force: true });
+    fs.rmSync(unrelated.root, { recursive: true, force: true });
+  }
 });
