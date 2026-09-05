@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<title>Start here · Trajecta</title>
+<style>
+  :root{color-scheme:light dark;font:18px/1.65 system-ui,sans-serif;background:#171b1b;color:#e9e7df}
+  body{max-width:760px;margin:0 auto;padding:48px 24px 80px}h1{font-size:2.5rem;line-height:1.1;letter-spacing:-.04em}h2{font-size:1.3rem;margin-top:2.2rem}a{color:#a9dec7}pre{padding:18px;background:#242c2b;border:1px solid #45534f;border-radius:8px;overflow:auto;font-size:.8rem}code{font-family:ui-monospace,monospace}small,.muted{color:#bbc5bf}.tag{display:inline-block;padding:3px 10px;border:1px solid #677f72;border-radius:20px;font-size:.8rem}.callout{border-left:3px solid #a9dec7;padding-left:18px}li{margin:.5rem 0}
+</style>
+<body>
+<span class="tag">Private evaluation · v0.1.0 · Not for sale</span>
+<h1>Continue the right work.<br>Only once.</h1>
+<p>Trajecta checks whether a local handoff still matches its work, branch, and target. Stale work stops. Current work resumes once. An equivalent retry returns the same receipt.</p>
+<p class="callout">This is a local SDK evaluation, not an automatic ChatGPT-to-Codex connector. Nothing here posts, contacts an AI service, or executes instructions inside a handoff.</p>
+
+<h2>Before you start</h2>
+<p>You need an Apple Silicon Mac, Node 22.19–22.x, npm, Git, and a new folder for testing. Keep real work and secrets out of the first trial.</p>
+<p>Compare the ZIP SHA-256 and seller key fingerprint with the separate values supplied with your download. A key inside the ZIP cannot establish its own origin. If values differ, stop.</p>
+
+<h2>1. Install the local package</h2>
+<p>Open Terminal in a new empty test folder. Replace the archive path below with the full path to the package inside this unpacked bundle. Keep the quotation marks if the path contains spaces.</p>
+<pre><code>npm install --offline --ignore-scripts --package-lock=false --no-audit --no-fund "/absolute/path/to/bundle/packages/trajecta-beta-0.1.0.tgz"
+./node_modules/.bin/trajecta-beta version</code></pre>
+<p>Expected: <code>Trajecta Verified Resume SDK Beta 0.1.0</code>. Installation uses the package on disk, has no dependency downloads, and does not change your shell startup files.</p>
+
+<h2>2. Run the isolated proof</h2>
+<pre><code>./node_modules/.bin/trajecta-beta demo --state-root ./demo-state</code></pre>
+<p>Read the three outcomes:</p>
+<ul>
+<li><strong>STALE:</strong> rejected; revision stays 3.</li>
+<li><strong>CURRENT:</strong> accepted; revision advances from 3 to 4.</li>
+<li><strong>RETRY:</strong> the same receipt bytes; revision stays 4.</li>
+</ul>
+<p>Receipts remain in <code>demo-state</code>. Use a new state-folder name for another trial. This isolated example is not evidence that your own project or an external AI completed work.</p>
+
+<h2>3. Check a local workspace</h2>
+<p>Open a Git workspace with at least one commit, an attached branch, and an <code>origin</code> remote. Invoke the installed command using its full path:</p>
+<pre><code>/absolute/path/to/test/node_modules/.bin/trajecta-beta doctor
+/absolute/path/to/test/node_modules/.bin/trajecta-beta host init --out target.json</code></pre>
+<p>Check the repository and branch it displays. The target card is private, expires in 30 minutes, and is single-use. Do not post it or send it to support.</p>
+
+<h2>Then choose a recipe</h2>
+<ul>
+<li><a href="recipes/01-planner-to-local-workspace.md">Planner → local workspace</a> — understand the manual handoff boundary.</li>
+<li><a href="recipes/02-stale-rejection.md">Stale rejection</a> — know why a packet must be refreshed.</li>
+<li><a href="recipes/03-inspect-retry-receipt.md">Inspect, retry, and receipt lookup</a> — distinguish inspection from acceptance.</li>
+</ul>
+<p class="muted">These instructions are under Customer-0 evaluation. Successful installation alone does not complete the full acceptance gate.</p>
+
+<h2>Something stopped?</h2>
+<p>Keep the error code, the step number, and what you expected. Do not share target cards, private work files, credentials, or the entire workspace. Start with <a href="TROUBLESHOOTING.md">troubleshooting</a> and the <a href="SUPPORTED-ENVIRONMENT.md">supported environment</a>.</p>
+<p><a href="START-HERE.md">Plain-text instructions</a> · <a href="LICENSES/BETA-COMMERCIAL-TERMS.txt">Evaluation terms</a> · <a href="THIRD-PARTY-NOTICES.txt">Component notices</a></p>
+<small>Commercial checkout is inactive. No payment or customer-use claim is made by this evaluation.</small>
+</body>
+</html>

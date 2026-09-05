@@ -4,7 +4,24 @@
 
 **Goal:** Create a byte-reproducible, not-for-sale evaluation archive with an auditable package, manifest, receipt, and detached signature. It is a release-integrity gate, not a Customer-0 usability result or commercial activation.
 
-**Scope boundary:** This plan creates seller-only release tooling and the evaluation archive. It does not publish, sell, activate Payhip, add terms acceptance, create customer onboarding, claim usability, perform the 15-step Customer-0 run, add hosted transport, or make a network-security claim beyond the bounded npm/package checks below.
+**Scope boundary:** This plan creates seller-only release tooling and the evaluation archive. It does not publish, sell, activate Payhip, add terms acceptance, claim usability, perform the 15-step Customer-0 run, add hosted transport, or make a network-security claim beyond the bounded npm/package checks below. Installation instructions may be drafted and packaged now, but their presence is not evidence of Customer-0 acceptance.
+
+## Evidence-driven correction — installed runtime (2026-09-05)
+
+The first real npm install exposed two packaging assumptions that repository-local
+tests did not cover: Node 22 refuses TypeScript stripping under `node_modules`,
+and importing the relocated CLI did not trigger its repository-relative launcher
+guard. The delivery goal is unchanged. Tasks 2–4 now require generated JavaScript
+runtime files and a bin that explicitly calls `runCli`. Type erasure happens only
+at build time; static local module suffixes become `.js`, and the beta kernel
+specifier points to the staged core. No loader, runtime compiler, installation
+script, or network dependency is added. All generated Apache runtime members are
+marked modified and retain their modification notices. npm tar members use the
+physical `package/` prefix; manifest ledger paths remain package-relative.
+
+Priority: installed version/doctor/demo must pass before further release polish.
+The later Customer-0 gate remains required and may not be replaced by this smoke
+test. No commercial activation is authorized by this correction.
 
 **Architecture:** `tools/release-integrity/` is seller-only and never enters the archive. A sanitized Git preflight snapshots a clean allowlisted source set at one resolved commit. All later construction consumes that immutable snapshot; it reads neither Git nor wall time. The builder stages one dependency-free private npm package, deterministically packs it, creates a non-self-referential manifest and member ledger, signs a fixed evaluation receipt, then writes and audits the exact approved ZIP tree.
 
@@ -65,15 +82,15 @@ package/
   package.json
   bin/trajecta-beta
   beta/DEVELOPMENT-BOUNDARY.md
-  beta/src/<every runtime .ts source>
-  core/src/<every required Apache runtime .ts source>
+  beta/src/<every generated runtime .js module>
+  core/src/<every required generated Apache runtime .js module>
   LICENSE
   NOTICE
   BETA-COMMERCIAL-TERMS.txt
   LICENSES/CORE-MODIFICATIONS.txt
 ```
 
-Assert `bin/trajecta-beta` imports only `../beta/src/cli.ts`; staged beta relative imports resolve inside `beta/src`; the generated staged `beta/src/kernel-port.ts` changes only its core module specifier to `../../core/src/index.ts`; and all core relative imports resolve inside `core/src`. Assert `beta/DEVELOPMENT-BOUNDARY.md` is installed, classified as `documentation`, declared in `files`, and present in the package entry's manifest `memberLedger`. Assert no tests, other docs, fixtures, source-repo manifest, Git metadata, seller tool, source path, dependency, lifecycle script, symlink, special file, or unexpected package member appears. Assert every staged regular member has one original license class; every Apache-derived member has an explicit modification state; the conservative `LICENSES/CORE-MODIFICATIONS.txt` lists each modified Apache-derived member; copied Apache `LICENSE`/`NOTICE` retain bytes; and commercial terms say evaluation only, not for sale, and not commercial activation.
+Assert `bin/trajecta-beta` imports only `runCli` from `../beta/src/cli.js` and explicitly invokes it with argv, cwd, and standard IO. Generated beta relative imports resolve inside `beta/src`, except the kernel port's approved `../../core/src/index.js`; all generated core relative imports resolve inside `core/src`. Build-time type erasure and module-suffix rewriting preserve runtime semantics, tested through the installed bin. Assert `beta/DEVELOPMENT-BOUNDARY.md` is installed, classified as `documentation`, declared in `files`, and present in the package entry's manifest `memberLedger`. Assert no tests, other docs, fixtures, source-repo manifest, Git metadata, seller tool, source path, dependency, lifecycle script, symlink, special file, or unexpected package member appears. Assert every staged regular member has one original license class; every Apache-derived generated module has `modified: true`; the conservative `LICENSES/CORE-MODIFICATIONS.txt` lists each modified Apache-derived member; copied Apache `LICENSE`/`NOTICE` retain bytes; and commercial terms say evaluation only, not for sale, and not commercial activation.
 
 **Green:** Copy only snapshot allowlisted inputs with normal modes (`0644`, bin `0755`), produce the exact generated layout, and write a sorted package-member ledger. `release/license-map.json` explicitly maps every staged path and Apache modification state; it is not distributed. Generate the tgz modification notice from that map, then fold those exact bytes into the existing outer `LICENSES/CORE-NOTICE.txt` after the core NOTICE text. Do not modify repository `NOTICE` unless an attribution audit proves a gap. Update no product source: this is a generated staging boundary.
 
@@ -147,7 +164,7 @@ node --experimental-strip-types --test tools/release-integrity/test/manifest-sig
 
 **Red:** Build from two independent clean snapshots and require every tgz, manifest, receipt, signature, checksum list, and ZIP byte equal. Inspect local and central headers: exact approved members, lexical order, STORE method, exact DOS release instant on every entry, no extras/comments, normalized mode, and no forbidden names. Reject checksum lines not using two spaces, UTF-8 LF, safe names, or no escaping; reject any directory/output/pin inside source or a non-new output directory. Prove assembly cannot create or modify `release-pins.json`, receipt, or signature after the final ZIP is written.
 
-**Green:** Write regular ZIP members only, STORE only, using the exact release-time metadata; assemble the unchanged approved archive tree. Emit no post-assembly evidence at this point: `release-pins.json` is external gate evidence written only after Task 8 audits the final immutable ZIP and reproduces it, while the receipt and signature stay untouched. Evaluation placeholder `START-HERE.html`, `START-HERE.md`, recipes, troubleshooting, and supported-environment files are explicitly non-onboarding placeholders: they provide no installation flow, commercial terms, checkbox, click-through, or acceptance language.
+**Green:** Write regular ZIP members only, STORE only, using the exact release-time metadata; assemble the unchanged approved archive tree. Emit no post-assembly evidence at this point: `release-pins.json` is external gate evidence written only after Task 8 audits the final immutable ZIP and reproduces it, while the receipt and signature stay untouched. Evaluation `START-HERE.html`, `START-HERE.md`, recipes, troubleshooting, and supported-environment files may contain draft installation instructions. They must label the evaluation boundary, contain no commercial acceptance mechanism, and make no claim of completed Customer-0 usability testing.
 
 **Verify:**
 

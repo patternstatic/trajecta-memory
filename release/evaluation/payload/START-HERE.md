@@ -1,0 +1,36 @@
+# Try Trajecta
+
+This evaluation demonstrates a local handoff that rejects stale work and resumes current work once. It requires an Apple Silicon Mac, Node 22.19–22.x, npm, and Git.
+
+## 1. Check your download
+
+Compare the ZIP SHA-256 and seller key fingerprint with the separate values supplied alongside your download. Keep those values outside this folder. An included key alone does not establish who sent the archive.
+
+## 2. Install in a new test folder
+
+In Terminal, open the unpacked bundle folder. Copy its absolute path before continuing. Create a new empty test folder and run:
+
+```sh
+npm install --offline --ignore-scripts --package-lock=false --no-audit --no-fund "/absolute/path/to/bundle/packages/trajecta-beta-0.1.0.tgz"
+./node_modules/.bin/trajecta-beta version
+./node_modules/.bin/trajecta-beta demo --state-root ./demo-state
+```
+
+Replace the archive path with your downloaded file. A successful demo prints STALE (revision 3 → 3), CURRENT (3 → 4), then RETRY with the same receipt and revision 4. This is an internal example, not your own project work. Use a new state directory for each demo.
+
+## 3. Check your own Git workspace
+
+From a local Git workspace with at least one commit, an attached branch and an `origin` remote, invoke the installed binary using its absolute path:
+
+```sh
+/absolute/path/to/test/node_modules/.bin/trajecta-beta doctor
+/absolute/path/to/test/node_modules/.bin/trajecta-beta host init --out target.json
+```
+
+The target card expires after 30 minutes and is single-use. Keep it private. Read the recipes before creating or accepting a handoff.
+
+## What to report
+
+Tell us which step stopped, the displayed error code, and what you expected. Do not send target cards, private work files, access tokens or your entire workspace.
+
+This is a Customer-0 evaluation build. Commercial checkout is inactive. Automated account integration and remote task execution are not included.

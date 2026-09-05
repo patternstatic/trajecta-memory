@@ -49,7 +49,23 @@ export function verifyBundle(input:{zip:Buffer;archiveSha256:string;publicKeyPem
   for(const m of manifest.members) {
     if(!payloadNames.delete(m.path)) fail();
     const bytes=files.get(m.path)!; if(bytes.length!==m.bytes || sha256Hex(bytes)!==m.sha256) fail();
-    if(m.path===PACKAGE_PATH) auditTgz(bytes,{releaseInstant:input.releaseInstant,expectedMembers:m.memberLedger});
+    if(m.path===PACKAGE_PATH) {
+      const audited = auditTgz(bytes,{releaseInstant:input.releaseInstant,expectedMembers:m.memberLedger});
+      const coreLicense = audited.members.get('LICENSE');
+      const coreNotice = audited.members.get('NOTICE');
+      const modifications = audited.members.get('LICENSES/CORE-MODIFICATIONS.txt');
+      if (!coreLicense || !coreNotice || !modifications
+        || !files.get('LICENSES/CORE-APACHE-2.0.txt')!.equals(coreLicense)
+        || !files.get('LICENSES/CORE-NOTICE.txt')!.equals(Buffer.concat([coreNotice,Buffer.from('\n'),modifications]))) {
+        releaseError('NOTICE_MISMATCH','Outer license and notice must preserve the packaged core license and modification notice.');
+      }
+      for (const inner of audited.memberLedger) {
+        if (inner.originalClass === 'apache-core' && inner.path.startsWith('core/src/')
+          && !modifications.toString('utf8').includes(`- ${inner.path}\n`)) {
+          releaseError('NOTICE_MISMATCH','Every generated Apache runtime member requires a modification notice.');
+        }
+      }
+    }
   }
   if(payloadNames.size || !canonicalJsonLf(manifest).equals(manifestBytes)) fail();
   const sum=files.get('SHA256SUMS.txt')!, covered=new Map(files); covered.delete('SHA256SUMS.txt');
