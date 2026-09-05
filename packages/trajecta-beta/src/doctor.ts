@@ -36,7 +36,7 @@ export interface DoctorResult {
 function check(name: DoctorCheck["name"], ok: boolean, detail: string): DoctorCheck { return { name, ok, detail }; }
 
 function nodeSupported(value: string): boolean {
-  const matched = /^(\d+)\.(\d+)\.(\d+)(?:\+[0-9A-Za-z.-]+)?$/.exec(value);
+  const matched = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:\+[0-9A-Za-z.-]+)?$/.exec(value);
   if (!matched) return false;
   const major = Number(matched[1]), minor = Number(matched[2]);
   return major === 22 && minor >= 19;

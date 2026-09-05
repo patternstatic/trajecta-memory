@@ -102,12 +102,28 @@ test("doctor returns unsupported-environment for each unsupported host requireme
       { platform: "darwin", architecture: "x64", nodeVersion: "22.19.0" },
       { platform: "darwin", architecture: "arm64", nodeVersion: "23.0.0" },
       { platform: "darwin", architecture: "arm64", nodeVersion: "22.19.0-rc.1" },
+      { platform: "darwin", architecture: "arm64", nodeVersion: "022.19.0" },
+      { platform: "darwin", architecture: "arm64", nodeVersion: "22.019.0" },
+      { platform: "darwin", architecture: "arm64", nodeVersion: "22.19.00" },
     ]) {
       const before = treeDigest(fixture.stateRoot);
       const result = runDoctor({ cwd: fixture.root, ...environment });
       assert.equal(result.code, "UNSUPPORTED_ENVIRONMENT");
       assert.equal(result.exitCode, 2);
       assert.equal(treeDigest(fixture.stateRoot), before);
+    }
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("doctor accepts only canonical SemVer cores at the supported node boundaries", () => {
+  // Would fail if coercion lets a noncanonical version string enter the supported range.
+  const fixture = makeWorkspace();
+  try {
+    for (const nodeVersion of ["22.19.0", "22.19.0+build.1", "22.99.999", "22.18.999", "23.0.0"]) {
+      const result = runDoctor({ cwd: fixture.root, platform: "darwin", architecture: "arm64", nodeVersion });
+      assert.equal(result.code, ["22.19.0", "22.19.0+build.1", "22.99.999"].includes(nodeVersion) ? "OK" : "UNSUPPORTED_ENVIRONMENT", nodeVersion);
     }
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
