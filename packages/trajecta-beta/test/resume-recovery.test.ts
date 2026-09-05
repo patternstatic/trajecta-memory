@@ -111,11 +111,11 @@ function acceptedReceipt(envelope: LocalResumeEnvelopeV1, createdAt: string): Lo
   };
 }
 
-function assertKernelSnapshotFitsButReceiptOverflows(f: ReturnType<typeof fixture>, envelope: LocalResumeEnvelopeV1): void {
+async function assertKernelSnapshotFitsButReceiptOverflows(f: ReturnType<typeof fixture>, envelope: LocalResumeEnvelopeV1): Promise<void> {
   const stateRoot = path.join(f.root, "admission-probe"), operationId = envelope.operationId;
   const journal = new OperationJournal({ stateRoot, clock: f.clock });
   const result = projectedKernelResult(f, envelope), receipt = acceptedReceipt(envelope, f.clock().toISOString());
-  withWriterLock({ stateRoot, operationId, clock: f.clock }, writer => {
+  await withWriterLock({ stateRoot, operationId, clock: f.clock }, writer => {
     journal.open({ operationId, attemptDigest: envelope.integrity.canonicalPayloadDigest, envelopeId: envelope.envelopeId, targetId: envelope.target.targetId }, writer);
     journal.transition(operationId, "inspected", {}, writer);
     const beforeReceipt = journal.assertTransitionChainPersistable(operationId, [
@@ -138,7 +138,7 @@ for (const variant of ["full-work", "near-receipt", "historic-inactive-shape"] a
   const packetBytes = Buffer.byteLength(JSON.stringify(candidate.envelope.packet), "utf8");
   assert.ok(packetBytes <= 6_000, "the transfer packet remains within the public 6 KiB envelope budget");
   if (variant === "full-work") assert.ok(Buffer.byteLength(JSON.stringify(candidate.current), "utf8") > 16 * 1024, "the complete live WorkItem exceeds the journal's 16 KiB durable JSON bound");
-  if (variant === "near-receipt") assertKernelSnapshotFitsButReceiptOverflows(f, candidate.envelope);
+  if (variant === "near-receipt") await assertKernelSnapshotFitsButReceiptOverflows(f, candidate.envelope);
   if (variant === "historic-inactive-shape") {
     assert.ok(Buffer.byteLength(JSON.stringify(candidate.current), "utf8") <= 16 * 1024, "the inactive-branch incompatibility is structural, not a size overflow");
     assert.equal(candidate.current.branches.find(branch => branch.label === "historic")!.cues.length, 21);
