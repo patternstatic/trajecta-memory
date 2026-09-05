@@ -363,3 +363,15 @@ test("rejected receipts commit equal before/after revisions and reject null or c
     });
   }
 });
+
+test("rejected null/null revisions fail before receipt creation for both rejection codes", async (t) => {
+  for (const rejectionCode of ["REVISION_CONFLICT", "BRANCH_MISMATCH"] as const) {
+    const stateRoot = root(t), store = new ReceiptStore({ stateRoot });
+    await withWriterLock(options(stateRoot), (writer) => {
+      const invalid = { ...receipt(), code: rejectionCode, observedRevisionBefore: null, observedRevisionAfter: null };
+      assert.throws(() => store.commit(invalid, writer), code("OPERATION_CONFLICT"));
+      assert.equal(store.readBytes(input.operationId), null);
+      assert.equal(fs.existsSync(path.join(stateRoot, "receipts")), false);
+    });
+  }
+});
