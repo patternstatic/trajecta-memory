@@ -2,6 +2,7 @@
   "schema": "trajecta.release-payload-policy/v1",
   "sourceRoots": [
     "tools/release-integrity/src/**/*.ts",
+    "tools/release-integrity/bin/trajecta-release",
     "release/trajecta-beta.package.json",
     "release/evaluation/**/*",
     "src/**/*.ts",

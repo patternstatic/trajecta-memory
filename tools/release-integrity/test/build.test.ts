@@ -3,7 +3,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { buildRelease } from "../src/build.ts";
+import { assertBuildRuntime, buildRelease } from "../src/build.ts";
+
+test("release builder pins its own TypeScript-stripping Node runtime", () => {
+  // Would fail if deterministic build bytes silently depended on a different Node implementation.
+  assert.doesNotThrow(() => assertBuildRuntime("v22.23.1"));
+  assert.throws(() => assertBuildRuntime("v22.19.0"));
+  assert.throws(() => assertBuildRuntime("v23.0.0"));
+});
 
 test("build rejects an in-source signing key and never creates output before preflight", () => {
   // Would fail if an evaluation build could copy seller authority into source or create an artifact before its source gate.

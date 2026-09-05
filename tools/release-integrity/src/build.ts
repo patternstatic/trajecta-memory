@@ -11,12 +11,18 @@ import { runControlledOfflineInstall } from "./run.ts";
 import { stagePackage } from "./stage-package.ts";
 
 const DOCUMENT_INPUTS = ["START-HERE.html", "START-HERE.md", "recipes/01-planner-to-local-workspace.md", "recipes/02-stale-rejection.md", "recipes/03-inspect-retry-receipt.md", "TROUBLESHOOTING.md", "SUPPORTED-ENVIRONMENT.md"] as const;
+const BUILDER_NODE_VERSION = "v22.23.1";
 
 export interface BuildReleaseOptions {
   sourceRoot: string; gitBin: string; npmCli: string; buildCommit: string;
   releaseInstant: string; verificationInstant: string; privateKey: string; publicKey: string; outputDir: string;
 }
 export interface BuiltRelease { archivePath: string; pinsPath: string; evidencePath: string; archiveSha256: string; publicKeyFingerprint: string; }
+
+/** The builder strips TypeScript during staging, so its exact implementation is frozen separately from buyer support. */
+export function assertBuildRuntime(version = process.version): void {
+  if (version !== BUILDER_NODE_VERSION) releaseError("BUILDER_NODE_VERSION_MISMATCH", "Release construction requires the pinned Node 22.23.1 runtime.");
+}
 
 function outside(source: string, candidate: string, code: string): string {
   if (typeof candidate !== "string" || !path.isAbsolute(candidate)) return releaseError(code, "Release inputs must use absolute paths.");
@@ -85,6 +91,7 @@ export function buildRelease(options: BuildReleaseOptions): BuiltRelease {
   let source: string;
   try { source = fs.realpathSync(options.sourceRoot); }
   catch { return releaseError("INVALID_SOURCE_ROOT", "Build source root is unavailable."); }
+  assertBuildRuntime();
   const output = assertNewOutputDirectory(options.outputDir, source);
   const privateKeyPem = readExternalPem(source, options.privateKey, "Private");
   const publicKeyPem = readExternalPem(source, options.publicKey, "Public");
@@ -107,7 +114,7 @@ export function buildRelease(options: BuildReleaseOptions): BuiltRelease {
     const pinsPath = path.join(output, "release-pins.json");
     fs.writeFileSync(pinsPath, canonicalJsonLf(pins), { mode: 0o600, flag: "wx" });
     const evidencePath = path.join(output, "release-evidence.json");
-    fs.writeFileSync(evidencePath, canonicalJsonLf({ schema: "trajecta.release-evidence/v1", archiveSha256: first.archiveSha256, keyFingerprint: first.publicKeyFingerprint, archiveAudit: "passed", reproducibility: "passed", offlineInstall: offline }), { mode: 0o600, flag: "wx" });
+    fs.writeFileSync(evidencePath, canonicalJsonLf({ schema: "trajecta.release-evidence/v1", archiveSha256: first.archiveSha256, keyFingerprint: first.publicKeyFingerprint, archiveAudit: "passed", reproducibility: "passed", builderNodeVersion: process.version, builderNpmVersion: offline.npmVersion, offlineInstall: offline }), { mode: 0o600, flag: "wx" });
     return Object.freeze({ archivePath, pinsPath, evidencePath, archiveSha256: first.archiveSha256, publicKeyFingerprint: first.publicKeyFingerprint });
   } finally {
     if (firstSnapshot) fs.rmSync(firstSnapshot.root, { recursive: true, force: true, maxRetries: 2 });

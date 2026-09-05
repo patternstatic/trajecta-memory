@@ -7,7 +7,7 @@ import { releaseError } from "./errors.ts";
 
 const FLAGS = ["--private-key", "--public-key", "--git-bin", "--npm-cli", "--build-commit", "--release-instant", "--verification-instant", "--output-dir"] as const;
 type Flag = typeof FLAGS[number];
-export type ReleaseCliArguments = ({ command: "build" } & Omit<BuildReleaseOptions, "sourceRoot">) | { command: "audit"; archive: string; publicKey: string; keyFingerprint: string; releaseInstant: string } | { command: "verify"; archive: string; publicKey: string; keyFingerprint: string; releaseInstant: string; outputDir: string };
+export type ReleaseCliArguments = ({ command: "build" } & Omit<BuildReleaseOptions, "sourceRoot">) | { command: "audit"; archive: string; archiveSha256: string; publicKey: string; keyFingerprint: string; releaseInstant: string } | { command: "verify"; archive: string; archiveSha256: string; publicKey: string; keyFingerprint: string; releaseInstant: string; outputDir: string };
 
 function flags(argv: readonly string[], expected: readonly string[]): Map<string, string> {
   if (argv.length !== 1 + expected.length * 2) return releaseError("INVALID_ARGUMENT", "Release command requires every accepted flag exactly once.");
@@ -25,9 +25,9 @@ export function parseReleaseCli(argv: readonly string[]): ReleaseCliArguments {
     const values = flags(argv, FLAGS);
     return Object.freeze({ command: "build", privateKey: values.get("--private-key")!, publicKey: values.get("--public-key")!, gitBin: values.get("--git-bin")!, npmCli: values.get("--npm-cli")!, buildCommit: values.get("--build-commit")!, releaseInstant: values.get("--release-instant")!, verificationInstant: values.get("--verification-instant")!, outputDir: values.get("--output-dir")! });
   }
-  const trust = ["--archive", "--public-key", "--key-fingerprint", "--release-instant"];
-  if (argv[0] === "audit") { const values = flags(argv, trust); return Object.freeze({ command: "audit", archive: values.get("--archive")!, publicKey: values.get("--public-key")!, keyFingerprint: values.get("--key-fingerprint")!, releaseInstant: values.get("--release-instant")! }); }
-  if (argv[0] === "verify") { const values = flags(argv, [...trust, "--output-dir"]); return Object.freeze({ command: "verify", archive: values.get("--archive")!, publicKey: values.get("--public-key")!, keyFingerprint: values.get("--key-fingerprint")!, releaseInstant: values.get("--release-instant")!, outputDir: values.get("--output-dir")! }); }
+  const trust = ["--archive", "--archive-sha256", "--public-key", "--key-fingerprint", "--release-instant"];
+  if (argv[0] === "audit") { const values = flags(argv, trust); return Object.freeze({ command: "audit", archive: values.get("--archive")!, archiveSha256: values.get("--archive-sha256")!, publicKey: values.get("--public-key")!, keyFingerprint: values.get("--key-fingerprint")!, releaseInstant: values.get("--release-instant")! }); }
+  if (argv[0] === "verify") { const values = flags(argv, [...trust, "--output-dir"]); return Object.freeze({ command: "verify", archive: values.get("--archive")!, archiveSha256: values.get("--archive-sha256")!, publicKey: values.get("--public-key")!, keyFingerprint: values.get("--key-fingerprint")!, releaseInstant: values.get("--release-instant")!, outputDir: values.get("--output-dir")! }); }
   return releaseError("INVALID_COMMAND", "Release command must be build, audit, or verify.");
 }
 
@@ -47,9 +47,11 @@ export function runReleaseCli(argv: readonly string[], sourceRoot: string): stri
     const result = buildRelease(buildOptionsFromCli(input, sourceRoot));
     return `${JSON.stringify({ archiveSha256: result.archiveSha256, publicKeyFingerprint: result.publicKeyFingerprint, archivePath: result.archivePath, pinsPath: result.pinsPath, evidencePath: result.evidencePath })}\n`;
   }
-  const zip = regularBytes(input.archive, "Archive"), publicKeyPem = regularBytes(input.publicKey, "Public key").toString("utf8"), pinned = { zip, archiveSha256: sha256Hex(zip), publicKeyPem, publicKeyFingerprint: input.keyFingerprint, releaseInstant: input.releaseInstant };
-  if (input.command === "audit") return `${JSON.stringify({ archiveSha256: pinned.archiveSha256, members: verifyBundle(pinned).size })}\n`;
-  return `${JSON.stringify({ archiveSha256: pinned.archiveSha256, extractedRoot: verifyAndExtractBundle({ ...pinned, outputDirectory: input.outputDir, sourceRoot }) })}\n`;
+  const zip = regularBytes(input.archive, "Archive"), publicKeyPem = regularBytes(input.publicKey, "Public key").toString("utf8");
+  if (!/^[a-f0-9]{64}$/.test(input.archiveSha256)) return releaseError("INVALID_DIGEST", "Pinned archive digest must be lowercase SHA-256.");
+  const pinned = { zip, archiveSha256: input.archiveSha256, publicKeyPem, publicKeyFingerprint: input.keyFingerprint, releaseInstant: input.releaseInstant };
+  if (input.command === "audit") return `${JSON.stringify({ archiveSha256: sha256Hex(zip), members: verifyBundle(pinned).size })}\n`;
+  return `${JSON.stringify({ archiveSha256: sha256Hex(zip), extractedRoot: verifyAndExtractBundle({ ...pinned, outputDirectory: input.outputDir, sourceRoot }) })}\n`;
 }
 
 if (process.argv[1] && new URL(import.meta.url).pathname === process.argv[1]) {
