@@ -112,3 +112,34 @@ Recursive staging and exact release classification:
 - All reads are bounded by the existing canonical ZIP, receipt, key, TGZ, member-count, member-size, path-depth, and compression-ratio limits.
 - The seller assembler and signer retain private construction/signing authority; their former public verification logic is now a compatibility re-export of the installed implementation.
 - No CLI, acceptance runner, acceptance-state creation, evidence-directory workflow, marketing, payment, or network behavior was added. Those remain outside Task 1.
+
+## Fix round 1 — reject hard links
+
+Review finding: `readBoundedRegularFile` rejected symbolic links but did not bind the regular inode's hard-link count. Real hard links to the archive, independent key, unpacked document, and installed runtime were added as focused regressions; each second pathname is outside the audited tree so the test isolates `nlink` rather than unexpected-tree-entry rejection.
+
+RED before the guard:
+
+```text
+$ node --experimental-strip-types --test packages/trajecta-beta/test/release-verification.test.ts
+not ok 1 - authenticates the delivered ZIP, unpacked tree, and installed package without writing state
+error: 'Missing expected exception.'
+stack: reject (.../release-verification.test.ts:102:10)
+       TestContext.<anonymous> (.../release-verification.test.ts:128:5)
+tests 1
+pass 0
+fail 1
+duration_ms 103.918291
+```
+
+GREEN after requiring `nlink === 1` in the pre-open `lstat`, opened descriptor, and post-read descriptor metadata:
+
+```text
+$ node --experimental-strip-types --test packages/trajecta-beta/test/release-verification.test.ts
+ok 1 - authenticates the delivered ZIP, unpacked tree, and installed package without writing state
+tests 1
+pass 1
+fail 0
+duration_ms 139.672
+```
+
+The existing before/after inventory assertion still covers every fixture path, file digest, mode, and link target on both accepted and rejected verification. Per fix-round scope, no broader suite was rerun; parent commit `0231019` already records the later full SDK regression evidence and was preserved unchanged.

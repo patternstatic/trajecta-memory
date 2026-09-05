@@ -123,6 +123,11 @@ test("authenticates the delivered ZIP, unpacked tree, and installed package with
     reject(fixture.input);
     fs.writeFileSync(fixture.input.archivePath, originalArchive);
 
+    const archiveHardLink = path.join(fixture.root, "outside-archive-link.zip");
+    fs.linkSync(fixture.input.archivePath, archiveHardLink);
+    reject(fixture.input);
+    fs.unlinkSync(archiveHardLink);
+
     reject({ ...fixture.input, pinnedZipSha256: "0".repeat(64) });
 
     const otherKey = generateKeyPairSync("ed25519").publicKey.export({ format: "pem", type: "spki" });
@@ -131,16 +136,31 @@ test("authenticates the delivered ZIP, unpacked tree, and installed package with
     reject(fixture.input);
     fs.writeFileSync(fixture.input.publicKeyPath, originalKey);
 
+    const keyHardLink = path.join(fixture.root, "outside-key-link.pem");
+    fs.linkSync(fixture.input.publicKeyPath, keyHardLink);
+    reject(fixture.input);
+    fs.unlinkSync(keyHardLink);
+
     const documentPath = path.join(fixture.input.bundleRoot, "START-HERE.md");
     const originalDocument = fs.readFileSync(documentPath);
     fs.writeFileSync(documentPath, "altered\n");
     reject(fixture.input);
     fs.writeFileSync(documentPath, originalDocument);
 
+    const documentHardLink = path.join(fixture.root, "outside-document-link.md");
+    fs.linkSync(documentPath, documentHardLink);
+    reject(fixture.input);
+    fs.unlinkSync(documentHardLink);
+
     const originalRuntime = fs.readFileSync(fixture.runtimePath);
     fs.writeFileSync(fixture.runtimePath, "export const runtime = 'tampered';\n");
     reject(fixture.input);
     fs.writeFileSync(fixture.runtimePath, originalRuntime);
+
+    const runtimeHardLink = path.join(fixture.root, "outside-runtime-link.js");
+    fs.linkSync(fixture.runtimePath, runtimeHardLink);
+    reject(fixture.input);
+    fs.unlinkSync(runtimeHardLink);
 
     fs.chmodSync(fixture.runtimePath, 0o755);
     reject(fixture.input);

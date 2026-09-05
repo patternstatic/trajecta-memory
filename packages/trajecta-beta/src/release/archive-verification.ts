@@ -149,15 +149,16 @@ function readBoundedRegularFile(file: string, maximumBytes: number, label: strin
   try { expected = fs.lstatSync(target); }
   catch { return releaseError("DELIVERED_FILE_INVALID", `${label} is missing.`); }
   if (!expected.isFile() || expected.isSymbolicLink() || expected.size > maximumBytes || (expectedBytes !== undefined && expected.size !== expectedBytes)) return releaseError("DELIVERED_FILE_INVALID", `${label} must be the expected bounded regular file.`);
+  if (expected.nlink !== 1) return releaseError("DELIVERED_HARD_LINK_REJECTED", `${label} may not have multiple hard links.`);
   if (expectedMode && (expected.mode & 0o777) !== Number.parseInt(expectedMode, 8)) return releaseError("DELIVERED_MODE_MISMATCH", `${label} mode does not match the authenticated ledger.`);
   let descriptor: number | undefined;
   try {
     descriptor = fs.openSync(target, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
     const opened = fs.fstatSync(descriptor);
-    if (!opened.isFile() || opened.dev !== expected.dev || opened.ino !== expected.ino || opened.size !== expected.size || (opened.mode & 0o777) !== (expected.mode & 0o777)) return releaseError("DELIVERED_FILE_CHANGED", `${label} changed while it was opened.`);
+    if (!opened.isFile() || opened.nlink !== 1 || opened.dev !== expected.dev || opened.ino !== expected.ino || opened.size !== expected.size || (opened.mode & 0o777) !== (expected.mode & 0o777)) return releaseError("DELIVERED_FILE_CHANGED", `${label} changed while it was opened.`);
     const bytes = fs.readFileSync(descriptor);
     const after = fs.fstatSync(descriptor);
-    if (after.dev !== expected.dev || after.ino !== expected.ino || after.size !== expected.size || (after.mode & 0o777) !== (expected.mode & 0o777) || bytes.length !== expected.size) return releaseError("DELIVERED_FILE_CHANGED", `${label} changed while it was read.`);
+    if (after.nlink !== 1 || after.dev !== expected.dev || after.ino !== expected.ino || after.size !== expected.size || (after.mode & 0o777) !== (expected.mode & 0o777) || bytes.length !== expected.size) return releaseError("DELIVERED_FILE_CHANGED", `${label} changed while it was read.`);
     return bytes;
   } catch (error) {
     if (error instanceof ReleaseIntegrityError) throw error;
