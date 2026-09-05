@@ -23,6 +23,8 @@ export interface TarAuditLimits {
 export interface AuditTgzOptions {
   releaseInstant: unknown;
   expectedMembers?: readonly TarLedgerMember[];
+  /** npm package tarballs use this fixed on-disk wrapper; ledgers remain logical package paths. */
+  packagePrefix?: "package/";
   limits?: Partial<TarAuditLimits>;
 }
 
@@ -172,12 +174,16 @@ export function auditTgz(tgz: Buffer, options: AuditTgzOptions): AuditedTgz {
     }
     if (members.length >= limits.maxMembers) releaseError("TAR_LIMIT_EXCEEDED", "Tar member count exceeds its bound.");
     const parsed = assertCanonicalHeader(header, releaseSeconds);
-    if ((parsed.path === "bin/trajecta-beta") !== (parsed.mode === "0755")) releaseError("INVALID_TAR_MODE", "Only the package binary may be executable.");
-    if (names.has(parsed.path)) releaseError("DUPLICATE_TAR_MEMBER", "Tar may not contain duplicate members.");
-    if (folded.has(parsed.path.toLocaleLowerCase("en-US"))) releaseError("CASE_COLLISION", "Tar members may not case-fold collide.");
-    if (parsed.path <= previous) releaseError("NONCANONICAL_TAR_ORDER", "Tar member paths must be strictly ascending.");
-    previous = parsed.path;
-    if (parsed.path.split("/").length > limits.maxPathDepth || parsed.bytes > limits.maxMemberBytes || parsed.bytes > limits.maxUncompressedBytes) releaseError("TAR_LIMIT_EXCEEDED", "Tar member exceeds a safety bound.");
+    const memberPath = options.packagePrefix === undefined ? parsed.path : (() => {
+      if (!parsed.path.startsWith(options.packagePrefix) || parsed.path.length === options.packagePrefix.length) return releaseError("INVALID_TAR_PACKAGE_PREFIX", "Package tar members must use the canonical package/ prefix.");
+      return parsed.path.slice(options.packagePrefix.length);
+    })();
+    if ((memberPath === "bin/trajecta-beta") !== (parsed.mode === "0755")) releaseError("INVALID_TAR_MODE", "Only the package binary may be executable.");
+    if (names.has(memberPath)) releaseError("DUPLICATE_TAR_MEMBER", "Tar may not contain duplicate members.");
+    if (folded.has(memberPath.toLocaleLowerCase("en-US"))) releaseError("CASE_COLLISION", "Tar members may not case-fold collide.");
+    if (memberPath <= previous) releaseError("NONCANONICAL_TAR_ORDER", "Tar member paths must be strictly ascending.");
+    previous = memberPath;
+    if (memberPath.split("/").length > limits.maxPathDepth || parsed.bytes > limits.maxMemberBytes || parsed.bytes > limits.maxUncompressedBytes) releaseError("TAR_LIMIT_EXCEEDED", "Tar member exceeds a safety bound.");
     const start = cursor + 512;
     const padding = (512 - (parsed.bytes % 512)) % 512;
     const end = start + parsed.bytes;
@@ -185,10 +191,10 @@ export function auditTgz(tgz: Buffer, options: AuditTgzOptions): AuditedTgz {
     // Classification is bound by the caller's staged/manifest ledger. A
     // header-only adversarial scan may omit it, but cannot become a release
     // audit because release construction always supplies expectedMembers.
-    const classification = options.expectedMembers?.find((member) => member.path === parsed.path)?.originalClass ?? "notice";
-    members.push(Object.freeze({ path: parsed.path, bytes: parsed.bytes, sha256: sha256Hex(stream.subarray(start, end)), mode: parsed.mode, originalClass: classification }));
-    names.add(parsed.path);
-    folded.add(parsed.path.toLocaleLowerCase("en-US"));
+    const classification = options.expectedMembers?.find((member) => member.path === memberPath)?.originalClass ?? "notice";
+    members.push(Object.freeze({ path: memberPath, bytes: parsed.bytes, sha256: sha256Hex(stream.subarray(start, end)), mode: parsed.mode, originalClass: classification }));
+    names.add(memberPath);
+    folded.add(memberPath.toLocaleLowerCase("en-US"));
     cursor = end + padding;
   }
   if (!sawEnd || members.length === 0) releaseError("INVALID_TAR_HEADER", "Tar must contain members and a canonical end marker.");

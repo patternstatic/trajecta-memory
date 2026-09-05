@@ -58,8 +58,8 @@ export function packPackage(options: PackPackageOptions): PackedPackage {
   catch { return releaseError("INVALID_STAGE_DIRECTORY", "Package root is unavailable."); }
   walk(packageRoot);
   if (actual.size !== listed.size || [...actual].some((member) => !listed.has(member))) releaseError("TAR_MEMBER_SET_MISMATCH", "Staged package tree has missing or extra members.");
-  const tgz = createDeterministicTgz(inputs, options.releaseInstant);
+  const tgz = createDeterministicTgz(inputs.map((member) => ({ ...member, path: `package/${member.path}` })), options.releaseInstant);
   const expected = inputs.map(({ path: memberPath, bytes, mode, originalClass }) => Object.freeze({ path: memberPath, bytes: bytes.length, sha256: sha256Hex(bytes), mode, originalClass }));
-  const audited = auditTgz(tgz, { releaseInstant: options.releaseInstant, expectedMembers: expected });
+  const audited = auditTgz(tgz, { releaseInstant: options.releaseInstant, expectedMembers: expected, packagePrefix: "package/" });
   return Object.freeze({ tgz, memberLedger: audited.memberLedger });
 }

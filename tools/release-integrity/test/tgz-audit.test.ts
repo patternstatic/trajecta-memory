@@ -92,7 +92,14 @@ test("packs deterministic bounded ustar bytes and binds every regular member int
   assert.equal(first.tgz[7], 0);
   assert.equal(first.tgz[8], 0);
   assert.equal(first.tgz[9], 255);
-  assert.deepEqual(auditTgz(first.tgz, { releaseInstant: instant, expectedMembers: staged.members }).memberLedger, staged.members);
+  assert.deepEqual(auditTgz(first.tgz, { releaseInstant: instant, expectedMembers: staged.members, packagePrefix: "package/" }).memberLedger, staged.members);
+});
+
+test("stores the npm-required package/ tar prefix without changing logical ledger paths", () => {
+  const staged = temporaryPackage();
+  const packed = packPackage({ packageRoot: staged.root, members: staged.members, releaseInstant: instant });
+  assert.deepEqual(auditTgz(packed.tgz, { releaseInstant: instant, expectedMembers: staged.members, packagePrefix: "package/" }).memberLedger, staged.members);
+  expectCode(() => auditTgz(packed.tgz, { releaseInstant: instant, expectedMembers: staged.members }), "INVALID_TAR_MODE");
 });
 
 test("rejects tar traversal, duplicate/case-colliding names, links, PAX records, and bad gzip headers", () => {
@@ -124,11 +131,11 @@ test("rejects non-canonical tar metadata, ordering, bounds, and a ledger that mi
   expectCode(() => auditTgz(canonicalGzip(wrongExecutable), { releaseInstant: instant }), "INVALID_TAR_MODE");
   const unordered = tar([{ name: "z", data: Buffer.from("x") }, { name: "a", data: Buffer.from("x") }]);
   expectCode(() => auditTgz(canonicalGzip(unordered), { releaseInstant: instant }), "NONCANONICAL_TAR_ORDER");
-  expectCode(() => auditTgz(packed.tgz, { releaseInstant: instant, expectedMembers: staged.members.slice(1) }), "TAR_MEMBER_SET_MISMATCH");
+  expectCode(() => auditTgz(packed.tgz, { releaseInstant: instant, expectedMembers: staged.members.slice(1), packagePrefix: "package/" }), "TAR_MEMBER_SET_MISMATCH");
   const mismatched = [...staged.members];
   mismatched[0] = { ...mismatched[0], sha256: "0".repeat(64) };
-  expectCode(() => auditTgz(packed.tgz, { releaseInstant: instant, expectedMembers: mismatched }), "TAR_LEDGER_MISMATCH");
-  expectCode(() => auditTgz(packed.tgz, { releaseInstant: instant, limits: { maxMembers: 1 } }), "TAR_LIMIT_EXCEEDED");
+  expectCode(() => auditTgz(packed.tgz, { releaseInstant: instant, expectedMembers: mismatched, packagePrefix: "package/" }), "TAR_LEDGER_MISMATCH");
+  expectCode(() => auditTgz(packed.tgz, { releaseInstant: instant, limits: { maxMembers: 1 }, packagePrefix: "package/" }), "TAR_LIMIT_EXCEEDED");
   const tooDeep = tar([{ name: "a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q", data: Buffer.from("x") }]);
   expectCode(() => auditTgz(canonicalGzip(tooDeep), { releaseInstant: instant }), "TAR_LIMIT_EXCEEDED");
   const highRatio = tar([{ name: "compressible", data: Buffer.alloc(8 * 1024, 0) }]);
@@ -147,11 +154,11 @@ test("fails closed when either mandatory in-package boundary notice is absent", 
 test("accepts exactly one canonical gzip member and no trailing bytes", () => {
   const staged = temporaryPackage();
   const packed = packPackage({ packageRoot: staged.root, members: staged.members, releaseInstant: instant });
-  expectCode(() => auditTgz(Buffer.concat([packed.tgz, Buffer.from([0])]), { releaseInstant: instant, expectedMembers: staged.members }), "INVALID_GZIP_STREAM");
-  expectCode(() => auditTgz(Buffer.concat([packed.tgz, canonicalGzip(Buffer.alloc(0))]), { releaseInstant: instant, expectedMembers: staged.members }), "INVALID_GZIP_STREAM");
+  expectCode(() => auditTgz(Buffer.concat([packed.tgz, Buffer.from([0])]), { releaseInstant: instant, expectedMembers: staged.members, packagePrefix: "package/" }), "INVALID_GZIP_STREAM");
+  expectCode(() => auditTgz(Buffer.concat([packed.tgz, canonicalGzip(Buffer.alloc(0))]), { releaseInstant: instant, expectedMembers: staged.members, packagePrefix: "package/" }), "INVALID_GZIP_STREAM");
   const invalidCrc = Buffer.from(packed.tgz);
   invalidCrc[invalidCrc.length - 8] ^= 1;
-  expectCode(() => auditTgz(invalidCrc, { releaseInstant: instant, expectedMembers: staged.members }), "INVALID_GZIP_STREAM");
+  expectCode(() => auditTgz(invalidCrc, { releaseInstant: instant, expectedMembers: staged.members, packagePrefix: "package/" }), "INVALID_GZIP_STREAM");
 });
 
 test("rejects mixed-container and unknown classifications in the expected inner ledger before decoding", () => {
@@ -159,6 +166,6 @@ test("rejects mixed-container and unknown classifications in the expected inner 
   const packed = packPackage({ packageRoot: staged.root, members: staged.members, releaseInstant: instant });
   for (const originalClass of ["mixed-container", "unknown"] as const) {
     const invalid = staged.members.map((member, index) => index === 0 ? { ...member, originalClass } : member);
-    expectCode(() => auditTgz(packed.tgz, { releaseInstant: instant, expectedMembers: invalid as never }), "INVALID_TAR_LEDGER");
+    expectCode(() => auditTgz(packed.tgz, { releaseInstant: instant, expectedMembers: invalid as never, packagePrefix: "package/" }), "INVALID_TAR_LEDGER");
   }
 });
