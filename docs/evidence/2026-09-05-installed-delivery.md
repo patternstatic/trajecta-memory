@@ -111,3 +111,12 @@ state root. It recorded demo exit **0**, stale rejection 3→3, current acceptan
 this is new supplemental evidence, not a retroactive correction of that run.
 Evidence: `/private/tmp/trajecta-customer-work.40WlAg/demo-followup.json`, SHA-256
 `1aeef8d7e23f4656d3f25f55a95d7d3a689177d9935fd1c7620a4281deac054c`.
+
+## Public verifier integration regression
+
+At `addc52a`, the parent ran `npm run check` to completion (exit 0), including
+the core tests/demo/proof and beta checks. The beta suite now reports 200 tests,
+200 passed, zero failed/skipped; its demo again records stale 3→3, current 3→4
+and the same receipt on retry. This verifies repository integration, not yet
+the final rebuilt customer's acceptance command. Independent Task 1 review is
+still pending at this checkpoint.
