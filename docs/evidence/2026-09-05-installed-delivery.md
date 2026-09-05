@@ -104,3 +104,10 @@ The demo printed the expected outcome trace, but its exit code is **unknown**:
 the operator's shell wrapper used a reserved variable after execution. This trial
 also did not separately record signature verification. Neither gap is promoted
 to a pass; the installed acceptance command and final artifact trial remain open.
+
+A separate follow-up used the same installed customer package with a new explicit
+state root. It recorded demo exit **0**, stale rejection 3→3, current acceptance
+3→4 and equivalent retry. The original trial's missing exit remains unknown;
+this is new supplemental evidence, not a retroactive correction of that run.
+Evidence: `/private/tmp/trajecta-customer-work.40WlAg/demo-followup.json`, SHA-256
+`1aeef8d7e23f4656d3f25f55a95d7d3a689177d9935fd1c7620a4281deac054c`.
