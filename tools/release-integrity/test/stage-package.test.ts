@@ -9,6 +9,11 @@ import type { SourceSnapshot } from "../src/preflight-source.ts";
 import { ReleaseIntegrityError } from "../src/errors.ts";
 
 const repository = path.resolve(import.meta.dirname, "../../..");
+let directorySequence = 0;
+
+function stageDirectory(label: string): string {
+  return path.join(os.tmpdir(), `trajecta-${label}-${process.pid}-${Date.now()}-${directorySequence++}`);
+}
 
 function snapshotFrom(root = repository): SourceSnapshot {
   const files = [
@@ -46,11 +51,23 @@ function expectCode(action: () => unknown, code: string): void {
   assert.throws(action, (error: unknown) => error instanceof ReleaseIntegrityError && error.code === code);
 }
 
+function replaceSnapshotBytes(snapshot: SourceSnapshot, relative: string, bytes: Buffer): SourceSnapshot {
+  const target = path.join(snapshot.root, relative);
+  fs.chmodSync(target, 0o600);
+  fs.writeFileSync(target, bytes);
+  return Object.freeze({
+    ...snapshot,
+    entries: Object.freeze(snapshot.entries.map((candidate) => candidate.path === relative
+      ? Object.freeze({ ...candidate, bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") })
+      : candidate)),
+  });
+}
+
 test("stages exactly the generated core + beta package and ledger from a snapshot", () => {
   const snapshot = snapshotFrom();
-  const stageDirectory = path.join(os.tmpdir(), `trajecta-stage-${process.pid}-${Date.now()}`);
-  const staged = stagePackage({ snapshot, stageDirectory });
-  const packageRoot = path.join(stageDirectory, "package");
+  const output = stageDirectory("stage");
+  const staged = stagePackage({ snapshot, stageDirectory: output });
+  const packageRoot = path.join(output, "package");
   assert.deepEqual(stagedFiles(packageRoot), staged.members.map((member) => member.path));
   assert.match(fs.readFileSync(path.join(packageRoot, "bin/trajecta-beta"), "utf8"), /^#!.*\nimport "\.\.\/beta\/src\/cli\.ts";\n$/);
   const originalKernel = fs.readFileSync(path.join(snapshot.root, "packages/trajecta-beta/src/kernel-port.ts"), "utf8");
@@ -75,24 +92,24 @@ test("fails closed on source drift, symlinks, and unclassified package members",
   const drift = path.join(snapshot.root, "packages/trajecta-beta/src/args.ts");
   fs.chmodSync(drift, 0o600);
   fs.appendFileSync(drift, "\n");
-  expectCode(() => stagePackage({ snapshot, stageDirectory: path.join(os.tmpdir(), `trajecta-drift-${Date.now()}`) }), "SNAPSHOT_DRIFT");
+  expectCode(() => stagePackage({ snapshot, stageDirectory: stageDirectory("drift") }), "SNAPSHOT_DRIFT");
 
   const linked = snapshotFrom();
   const source = path.join(linked.root, "packages/trajecta-beta/src/args.ts");
   fs.unlinkSync(source);
   fs.symlinkSync("canonical.ts", source);
-  expectCode(() => stagePackage({ snapshot: linked, stageDirectory: path.join(os.tmpdir(), `trajecta-symlink-${Date.now()}`) }), "UNSAFE_SNAPSHOT");
+  expectCode(() => stagePackage({ snapshot: linked, stageDirectory: stageDirectory("symlink") }), "UNSAFE_SNAPSHOT");
 
   const special = snapshotFrom();
   const specialSource = path.join(special.root, "packages/trajecta-beta/src/args.ts");
   fs.unlinkSync(specialSource);
   fs.mkdirSync(specialSource);
-  expectCode(() => stagePackage({ snapshot: special, stageDirectory: path.join(os.tmpdir(), `trajecta-special-${Date.now()}`) }), "UNSAFE_SNAPSHOT");
+  expectCode(() => stagePackage({ snapshot: special, stageDirectory: stageDirectory("special") }), "UNSAFE_SNAPSHOT");
 
   const colliding = snapshotFrom();
   const original = colliding.entries.find((candidate) => candidate.path === "packages/trajecta-beta/src/args.ts")!;
   const collisionSnapshot = Object.freeze({ ...colliding, entries: Object.freeze([...colliding.entries, Object.freeze({ ...original, path: "packages/trajecta-beta/src/ARGS.ts" })]) });
-  expectCode(() => stagePackage({ snapshot: collisionSnapshot, stageDirectory: path.join(os.tmpdir(), `trajecta-case-${Date.now()}`) }), "CASE_COLLISION");
+  expectCode(() => stagePackage({ snapshot: collisionSnapshot, stageDirectory: stageDirectory("case") }), "CASE_COLLISION");
 
   const unclassified = snapshotFrom();
   const mapPath = path.join(unclassified.root, "release/license-map.json");
@@ -107,5 +124,43 @@ test("fails closed on source drift, symlinks, and unclassified package members",
       ? Object.freeze({ ...candidate, bytes: mapBytes.length, sha256: createHash("sha256").update(mapBytes).digest("hex") })
       : candidate)),
   });
-  expectCode(() => stagePackage({ snapshot: updatedSnapshot, stageDirectory: path.join(os.tmpdir(), `trajecta-unclassified-${Date.now()}`) }), "UNCLASSIFIED_MEMBER");
+  expectCode(() => stagePackage({ snapshot: updatedSnapshot, stageDirectory: stageDirectory("unclassified") }), "UNCLASSIFIED_MEMBER");
+});
+
+test("accepts only the exact dependency-free package-template schema", () => {
+  for (const field of ["publishConfig", "main", "exports", "workspaces", "unexpected"]) {
+    const snapshot = snapshotFrom();
+    const template = JSON.parse(fs.readFileSync(path.join(snapshot.root, "release/trajecta-beta.package.json"), "utf8"));
+    template[field] = field === "workspaces" ? [] : {};
+    const altered = replaceSnapshotBytes(snapshot, "release/trajecta-beta.package.json", Buffer.from(`${JSON.stringify(template)}\n`));
+    expectCode(() => stagePackage({ snapshot: altered, stageDirectory: stageDirectory(`template-${field}`) }), "INVALID_PACKAGE_TEMPLATE");
+  }
+  for (const nested of ["engines", "bin"] as const) {
+    const snapshot = snapshotFrom();
+    const template = JSON.parse(fs.readFileSync(path.join(snapshot.root, "release/trajecta-beta.package.json"), "utf8"));
+    template[nested].unexpected = "no";
+    const altered = replaceSnapshotBytes(snapshot, "release/trajecta-beta.package.json", Buffer.from(`${JSON.stringify(template)}\n`));
+    expectCode(() => stagePackage({ snapshot: altered, stageDirectory: stageDirectory(`template-${nested}`) }), "INVALID_PACKAGE_TEMPLATE");
+  }
+});
+
+test("fails closed on dynamic imports and identical-ledger symlinked snapshot ancestry", () => {
+  for (const relative of ["packages/trajecta-beta/src/args.ts", "src/store.ts"]) {
+    const snapshot = snapshotFrom();
+    const source = fs.readFileSync(path.join(snapshot.root, relative));
+    const altered = replaceSnapshotBytes(snapshot, relative, Buffer.concat([source, Buffer.from("\nvoid import('../../outside.ts');\n")]));
+    expectCode(() => stagePackage({ snapshot: altered, stageDirectory: stageDirectory("dynamic") }), "DYNAMIC_IMPORT_FORBIDDEN");
+  }
+
+  const ancestor = snapshotFrom();
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "trajecta-outside-identical-"));
+  fs.cpSync(path.join(ancestor.root, "packages"), path.join(outside, "packages"), { recursive: true });
+  fs.rmSync(path.join(ancestor.root, "packages"), { recursive: true, force: true });
+  fs.symlinkSync(path.join(outside, "packages"), path.join(ancestor.root, "packages"));
+  expectCode(() => stagePackage({ snapshot: ancestor, stageDirectory: stageDirectory("ancestor-link") }), "UNSAFE_SNAPSHOT");
+
+  const rooted = snapshotFrom();
+  const redirectedRoot = path.join(os.tmpdir(), `trajecta-root-link-${process.pid}-${Date.now()}-${directorySequence++}`);
+  fs.symlinkSync(rooted.root, redirectedRoot);
+  expectCode(() => stagePackage({ snapshot: Object.freeze({ ...rooted, root: redirectedRoot }), stageDirectory: stageDirectory("root-link") }), "UNSAFE_SNAPSHOT");
 });

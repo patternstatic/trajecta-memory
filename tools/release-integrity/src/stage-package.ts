@@ -47,6 +47,14 @@ interface SnapshotIndex {
   entries: ReadonlyMap<string, SnapshotEntry>;
 }
 
+interface DirectoryBinding {
+  path: string;
+  dev: number;
+  ino: number;
+  mode: number;
+  descriptor: number;
+}
+
 function samePathOrder(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
@@ -60,8 +68,11 @@ function assertSnapshotRelativePath(value: string): string {
 
 function indexSnapshot(snapshot: SourceSnapshot): SnapshotIndex {
   if (!snapshot || typeof snapshot.root !== "string" || !path.isAbsolute(snapshot.root) || !Array.isArray(snapshot.entries)) releaseError("INVALID_SNAPSHOT", "A frozen source snapshot is required.");
-  let root: string;
-  try { root = fs.realpathSync(snapshot.root); } catch { return releaseError("INVALID_SNAPSHOT", "Snapshot root is unavailable."); }
+  const root = path.resolve(snapshot.root);
+  let rootStat: fs.Stats;
+  try { rootStat = fs.lstatSync(root); }
+  catch { return releaseError("INVALID_SNAPSHOT", "Snapshot root is unavailable."); }
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) return releaseError("UNSAFE_SNAPSHOT", "Snapshot root must be a no-follow directory.");
   const entries = new Map<string, SnapshotEntry>();
   const folded = new Set<string>();
   for (const entry of snapshot.entries) {
@@ -75,27 +86,81 @@ function indexSnapshot(snapshot: SourceSnapshot): SnapshotIndex {
   return { root, entries };
 }
 
+function openBoundDirectory(directory: string): DirectoryBinding {
+  let expected: fs.Stats;
+  try { expected = fs.lstatSync(directory); } catch { return releaseError("UNSAFE_SNAPSHOT", "Snapshot ancestry is unavailable."); }
+  if (!expected.isDirectory() || expected.isSymbolicLink()) return releaseError("UNSAFE_SNAPSHOT", "Snapshot ancestry must contain only no-follow directories.");
+  const flags = fs.constants.O_RDONLY | (fs.constants.O_DIRECTORY ?? 0) | (fs.constants.O_NOFOLLOW ?? 0);
+  let descriptor: number | undefined;
+  try {
+    descriptor = fs.openSync(directory, flags);
+    const actual = fs.fstatSync(descriptor);
+    if (!actual.isDirectory() || actual.dev !== expected.dev || actual.ino !== expected.ino || (actual.mode & 0o777) !== (expected.mode & 0o777)) return releaseError("UNSAFE_SNAPSHOT", "Snapshot ancestry changed while being opened.");
+    return { path: directory, dev: actual.dev, ino: actual.ino, mode: actual.mode & 0o777, descriptor };
+  } catch (error) {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
+    if (error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ELOOP") return releaseError("UNSAFE_SNAPSHOT", "Snapshot ancestry may not contain symbolic links.");
+    if (error instanceof Error && error.name === "ReleaseIntegrityError") throw error;
+    return releaseError("UNSAFE_SNAPSHOT", "Snapshot ancestry could not be opened without following links.");
+  }
+}
+
+function verifyDirectoryBinding(binding: DirectoryBinding): void {
+  const descriptorStat = fs.fstatSync(binding.descriptor);
+  let pathStat: fs.Stats;
+  try { pathStat = fs.lstatSync(binding.path); } catch { return releaseError("SNAPSHOT_DRIFT", "Snapshot ancestry changed while being read."); }
+  if (!descriptorStat.isDirectory() || descriptorStat.dev !== binding.dev || descriptorStat.ino !== binding.ino || (descriptorStat.mode & 0o777) !== binding.mode || !pathStat.isDirectory() || pathStat.isSymbolicLink() || pathStat.dev !== binding.dev || pathStat.ino !== binding.ino || (pathStat.mode & 0o777) !== binding.mode) releaseError("SNAPSHOT_DRIFT", "Snapshot ancestry changed while being read.");
+}
+
+function openSnapshotAncestry(index: SnapshotIndex, relative: string): DirectoryBinding[] {
+  const components = relative.split("/");
+  const bindings: DirectoryBinding[] = [];
+  let current = index.root;
+  try {
+    bindings.push(openBoundDirectory(current));
+    for (const component of components.slice(0, -1)) {
+      current = path.join(current, component);
+      bindings.push(openBoundDirectory(current));
+    }
+    return bindings;
+  } catch (error) {
+    for (const binding of bindings) fs.closeSync(binding.descriptor);
+    throw error;
+  }
+}
+
+function closeSnapshotAncestry(bindings: readonly DirectoryBinding[]): void {
+  for (const binding of bindings) fs.closeSync(binding.descriptor);
+}
+
 function readSnapshot(index: SnapshotIndex, relative: string): Buffer {
   const entry = index.entries.get(relative);
   if (!entry) return releaseError("SNAPSHOT_INPUT_MISSING", "The frozen snapshot lacks a required staged input.");
   const source = path.resolve(index.root, relative);
   if (!source.startsWith(`${index.root}${path.sep}`)) return releaseError("UNSAFE_SNAPSHOT", "Snapshot input escapes the snapshot root.");
+  const ancestry = openSnapshotAncestry(index, relative);
   let expected: fs.Stats;
-  try { expected = fs.lstatSync(source); } catch { return releaseError("SNAPSHOT_INPUT_MISSING", "A frozen snapshot input is absent."); }
-  if (!expected.isFile() || expected.isSymbolicLink()) return releaseError("UNSAFE_SNAPSHOT", "Snapshot inputs must be no-follow regular files.");
-  const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0);
-  let descriptor: number | undefined;
   try {
-    descriptor = fs.openSync(source, flags);
-    const actual = fs.fstatSync(descriptor);
-    if (!actual.isFile() || actual.dev !== expected.dev || actual.ino !== expected.ino || actual.size !== expected.size) return releaseError("SNAPSHOT_DRIFT", "A snapshot input changed while being read.");
-    const bytes = fs.readFileSync(descriptor);
-    const after = fs.fstatSync(descriptor);
-    if (after.dev !== expected.dev || after.ino !== expected.ino || after.size !== expected.size) return releaseError("SNAPSHOT_DRIFT", "A snapshot input changed while being read.");
-    if (bytes.length !== entry.bytes || sha256Hex(bytes) !== entry.sha256) return releaseError("SNAPSHOT_DRIFT", "Snapshot input bytes do not match the frozen ledger.");
-    return bytes;
+    try { expected = fs.lstatSync(source); } catch { return releaseError("SNAPSHOT_INPUT_MISSING", "A frozen snapshot input is absent."); }
+    if (!expected.isFile() || expected.isSymbolicLink()) return releaseError("UNSAFE_SNAPSHOT", "Snapshot inputs must be no-follow regular files.");
+    const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0);
+    let descriptor: number | undefined;
+    try {
+      descriptor = fs.openSync(source, flags);
+      const actual = fs.fstatSync(descriptor);
+      if (!actual.isFile() || actual.dev !== expected.dev || actual.ino !== expected.ino || actual.size !== expected.size) return releaseError("SNAPSHOT_DRIFT", "A snapshot input changed while being read.");
+      for (const binding of ancestry) verifyDirectoryBinding(binding);
+      const bytes = fs.readFileSync(descriptor);
+      const after = fs.fstatSync(descriptor);
+      for (const binding of ancestry) verifyDirectoryBinding(binding);
+      if (after.dev !== expected.dev || after.ino !== expected.ino || after.size !== expected.size) return releaseError("SNAPSHOT_DRIFT", "A snapshot input changed while being read.");
+      if (bytes.length !== entry.bytes || sha256Hex(bytes) !== entry.sha256) return releaseError("SNAPSHOT_DRIFT", "Snapshot input bytes do not match the frozen ledger.");
+      return bytes;
+    } finally {
+      if (descriptor !== undefined) fs.closeSync(descriptor);
+    }
   } finally {
-    if (descriptor !== undefined) fs.closeSync(descriptor);
+    closeSnapshotAncestry(ancestry);
   }
 }
 
@@ -108,10 +173,15 @@ function parsePackageTemplate(bytes: Buffer): void {
   let template: Record<string, unknown>;
   try { template = JSON.parse(utf8(bytes, "Package template")) as Record<string, unknown>; }
   catch { return releaseError("INVALID_PACKAGE_TEMPLATE", "Package template must be JSON."); }
-  if (!template || Array.isArray(template) || template.name !== "@patternstatic/trajecta-beta" || template.version !== "0.1.0" || template.private !== true || template.type !== "module") return releaseError("INVALID_PACKAGE_TEMPLATE", "Package template identity is invalid.");
+  const exactKeys = (value: Record<string, unknown>, expected: readonly string[]): boolean => {
+    const keys = Object.keys(value).sort(samePathOrder);
+    const sortedExpected = [...expected].sort(samePathOrder);
+    return keys.length === sortedExpected.length && keys.every((key, index) => key === sortedExpected[index]);
+  };
+  if (!template || Array.isArray(template) || !exactKeys(template, ["name", "version", "private", "type", "engines", "bin", "files"]) || template.name !== "@patternstatic/trajecta-beta" || template.version !== "0.1.0" || template.private !== true || template.type !== "module") return releaseError("INVALID_PACKAGE_TEMPLATE", "Package template identity is invalid.");
   const engines = template.engines as Record<string, unknown>;
   const bin = template.bin as Record<string, unknown>;
-  if (!engines || Array.isArray(engines) || engines.node !== ">=22.19 <23" || !bin || Array.isArray(bin) || Object.keys(bin).length !== 1 || bin["trajecta-beta"] !== "bin/trajecta-beta") releaseError("INVALID_PACKAGE_TEMPLATE", "Package template runtime fields are invalid.");
+  if (!engines || Array.isArray(engines) || !exactKeys(engines, ["node"]) || engines.node !== ">=22.19 <23" || !bin || Array.isArray(bin) || !exactKeys(bin, ["trajecta-beta"]) || bin["trajecta-beta"] !== "bin/trajecta-beta") releaseError("INVALID_PACKAGE_TEMPLATE", "Package template runtime fields are invalid.");
   if (!Array.isArray(template.files) || template.files.length !== REQUIRED_TEMPLATE_FILES.length || template.files.some((value, index) => value !== REQUIRED_TEMPLATE_FILES[index])) releaseError("INVALID_PACKAGE_TEMPLATE", "Package template files list is invalid.");
   for (const field of ["dependencies", "optionalDependencies", "peerDependencies", "bundledDependencies", "scripts"]) if (Object.hasOwn(template, field)) releaseError("INVALID_PACKAGE_TEMPLATE", "The staged package cannot declare dependencies or lifecycle scripts.");
 }
@@ -156,6 +226,9 @@ function parseStagedPolicyPaths(bytes: Buffer): string[] {
 }
 
 function moduleSpecifiers(source: string): string[] {
+  // Dynamic loading can bypass the staged import boundary. This package has no
+  // dynamic-import use case, so fail before attempting static import analysis.
+  if (/\bimport(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\r\n]*(?:\r?\n|$))*\(/.test(source)) releaseError("DYNAMIC_IMPORT_FORBIDDEN", "Staged runtime source may not use dynamic imports.");
   const specifiers: string[] = [];
   const expression = /\b(?:from\s*|import\s*)["'](\.{1,2}\/[^"']+)["']/g;
   for (const matched of source.matchAll(expression)) specifiers.push(matched[1]);
