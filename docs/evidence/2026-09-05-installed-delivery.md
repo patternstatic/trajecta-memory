@@ -120,3 +120,14 @@ the core tests/demo/proof and beta checks. The beta suite now reports 200 tests,
 and the same receipt on retry. This verifies repository integration, not yet
 the final rebuilt customer's acceptance command. Independent Task 1 review is
 still pending at this checkpoint.
+
+## Installed command integration regression
+
+At `f706349`, parent `npm run check` completed with exit0, including core
+tests/demo/proof and beta204/204 (zero failed or skipped), then the beta demo.
+Node emitted the known seller-side TypeScript stripping ExperimentalWarning;
+it is disclosed, not counted as an application failure or hidden.
+The retained installed-command evidence digest was independently read and
+matched `64dd76d2c27438b9ec117c165e91ce56b0dee6cbd16c0fbeea2751ba64e0c058`:
+install exit0, final revision4, cleanup and semantic equivalence true. This is
+still an ephemeral signed test fixture, not the final frozen delivery archive.
