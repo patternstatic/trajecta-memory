@@ -7,6 +7,7 @@ import path from "node:path";
 import { syncBuiltinESMExports } from "node:module";
 import test from "node:test";
 import { BetaError, OperationJournal, ReceiptStore, withWriterLock, type LocalResumeReceiptV1 } from "../src/index.ts";
+import { TrajectaStore } from "../../../src/index.ts";
 
 const now = "2026-09-05T00:00:00.000Z";
 const input = { operationId: "operation:one", attemptDigest: "a".repeat(64), envelopeId: "envelope:one", targetId: "target:one" };
@@ -14,10 +15,10 @@ const acceptance = { source: "runtime-flag" as const, observedAt: now };
 const surface = { kind: "local" as const, name: "test", session: "session:one" };
 const kernelResult = {
   work: { id: "work:one", topic: "test", goal: "test", instruction: null, status: "active" as const, revision: 2, activeBranchId: "branch:one", branches: [], openLoops: [], nextAction: null, lastSurface: surface, createdAt: now, updatedAt: now },
-  delta: { id: "delta:one", operationId: input.operationId, workId: "work:one", revision: 2, kind: "resume" as const, summary: "resumed", surface, branchId: "branch:one", targetSurface: null, provenance: [], createdAt: now },
+  delta: { id: "delta:one", operationId: `${input.operationId}.kernel`, workId: "work:one", revision: 2, kind: "resume" as const, summary: "resumed", surface, branchId: "branch:one", targetSurface: null, provenance: [], createdAt: now },
 };
 function receipt(accepted = false): LocalResumeReceiptV1 {
-  return { schema: "trajecta.local-resume-receipt/v1", receiptId: "receipt:one", ...input, outcome: accepted ? "accepted" : "rejected", code: accepted ? "RESUMED" : "REVISION_CONFLICT", repositoryFingerprint: "b".repeat(64), stateRootFingerprint: "c".repeat(64), workId: "work:one", branchId: "branch:one", packetId: "packet:one", expectedRevision: 1, observedRevisionBefore: accepted ? 1 : 2, observedRevisionAfter: accepted ? 2 : null, provenance: [], evidence: [], createdAt: now };
+  return { schema: "trajecta.local-resume-receipt/v1", receiptId: "receipt:one", ...input, outcome: accepted ? "accepted" : "rejected", code: accepted ? "RESUMED" : "REVISION_CONFLICT", repositoryFingerprint: "b".repeat(64), stateRootFingerprint: "c".repeat(64), workId: "work:one", branchId: "branch:one", packetId: "packet:one", expectedRevision: 1, observedRevisionBefore: accepted ? 1 : 2, observedRevisionAfter: 2, provenance: [], evidence: [], createdAt: now };
 }
 function code(want: string) { return (e: unknown) => e instanceof BetaError && e.code === want; }
 function root(t: any) {
@@ -285,4 +286,80 @@ test("altered kernel or receipt identity and out-of-stage evidence cannot enter 
     }
     assert.equal(journal.lookup(input.operationId)?.state, "kernel-resumed");
   });
+});
+
+for (const multiline of [false, true]) {
+  test(`genuine kernel resume result persists with projected ID${multiline ? " and bounded multiline/tab work text" : ""}`, async (t) => {
+    const stateRoot = root(t), kernelRoot = root(t), store = new TrajectaStore(kernelRoot, () => new Date(now));
+    const workText = multiline ? "First line\nSecond\tpart" : "Bounded work text";
+    const opened = store.open({ operationId: "operation:open-fixture", topic: "Fixture", goal: workText, instruction: workText, surface,
+      initialBranch: { label: workText, purpose: workText, cues: [workText], returnPoint: workText } });
+    const captured = store.capture({ operationId: "operation:capture-fixture", workId: opened.work.id, expectedRevision: 1, kind: "next_action", summary: workText, nextAction: workText, openLoops: [workText], surface });
+    const resumeInput = { operationId: `${input.operationId}.kernel`, workId: opened.work.id, expectedRevision: captured.work.revision, surface, instruction: workText };
+    const result = store.resume(resumeInput);
+    assert.equal(result.delta.operationId, "operation:one.kernel");
+    assert.equal(result.work.revision, 3);
+    await withWriterLock(options(stateRoot), (writer) => {
+      const journal = new OperationJournal({ stateRoot }); journal.open(input, writer);
+      journal.transition(input.operationId, "inspected", {}, writer);
+      journal.transition(input.operationId, "reserved", { acceptance }, writer);
+      const resumed = journal.transition(input.operationId, "kernel-resumed", { kernelResult: result }, writer);
+      assert.deepEqual(resumed.kernelResult, result);
+      assert.equal(journal.lookup(input.operationId)?.kernelResult?.delta.operationId, "operation:one.kernel");
+      const completedReceipt = { ...receipt(true), workId: result.work.id, branchId: result.work.activeBranchId, expectedRevision: 2, observedRevisionBefore: 2, observedRevisionAfter: 3 };
+      journal.transition(input.operationId, "receipt-committed", { receipt: completedReceipt }, writer);
+      assert.equal(journal.transition(input.operationId, "target-consumed", {}, writer).state, "target-consumed");
+      assert.deepEqual(store.resume(resumeInput), result);
+    });
+  });
+}
+
+test("receipt read rejects a substituted parent directory even when the open file metadata stays unchanged", async (t) => {
+  for (const replacement of ["directory", "symlink"] as const) {
+    const stateRoot = root(t), store = new ReceiptStore({ stateRoot });
+    await withWriterLock(options(stateRoot), (writer) => store.commit(receipt(true), writer));
+    const directory = path.join(stateRoot, "receipts"), saved = `${directory}.saved`, target = file(stateRoot, "receipts"), original = fs.readSync;
+    const before = fs.statSync(target), replacementBytes = Buffer.from("{torn");
+    let substituted = false;
+    fs.readSync = ((...args: any[]) => {
+      const count = (original as any)(...args);
+      if (!substituted) {
+        substituted = true; fs.renameSync(directory, saved);
+        if (replacement === "symlink") fs.symlinkSync(saved, directory);
+        else { fs.mkdirSync(directory, { mode: 0o700 }); fs.writeFileSync(target, replacementBytes, { mode: 0o600 }); }
+        const after = fs.fstatSync(args[0]);
+        assert.equal(after.ino, before.ino); assert.equal(after.ctimeMs, before.ctimeMs); assert.equal(after.mtimeMs, before.mtimeMs);
+      }
+      return count;
+    }) as typeof fs.readSync;
+    syncBuiltinESMExports();
+    try { assert.throws(() => store.readBytes(input.operationId), code("OPERATION_IN_DOUBT")); }
+    finally { fs.readSync = original; syncBuiltinESMExports(); }
+    if (replacement === "directory") assert.deepEqual(fs.readFileSync(target), replacementBytes);
+    else assert.equal(fs.lstatSync(directory).isSymbolicLink(), true);
+  }
+});
+
+test("rejected receipts commit equal before/after revisions and reject null or changed after revisions", async (t) => {
+  for (const rejectionCode of ["REVISION_CONFLICT", "BRANCH_MISMATCH"] as const) {
+    const stateRoot = root(t), store = new ReceiptStore({ stateRoot });
+    const rejected = { ...receipt(), code: rejectionCode, observedRevisionBefore: 2, observedRevisionAfter: 2 };
+    await withWriterLock(options(stateRoot), (writer) => {
+      const journal = new OperationJournal({ stateRoot }); journal.open(input, writer); journal.transition(input.operationId, "inspected", {}, writer);
+      for (const observedRevisionAfter of [null, 1, 3]) {
+        const invalid = { ...rejected, observedRevisionAfter };
+        assert.throws(() => store.commit(invalid, writer), code("OPERATION_CONFLICT"));
+        assert.throws(() => journal.transition(input.operationId, "receipt-committed", { receipt: invalid }, writer), code("OPERATION_CONFLICT"));
+        assert.equal(store.readBytes(input.operationId), null);
+        assert.equal(journal.lookup(input.operationId)?.state, "inspected");
+      }
+      const bytes = store.commit(rejected, writer);
+      assert.equal(JSON.parse(bytes.toString()).observedRevisionAfter, 2);
+      assert.deepEqual(store.commit(rejected, writer), bytes);
+      const committed = journal.transition(input.operationId, "receipt-committed", { receipt: rejected }, writer);
+      assert.equal(committed.acceptance, null); assert.equal(committed.kernelResult, null);
+      for (const observedRevisionAfter of [null, 1, 3]) assert.throws(() => store.commit({ ...rejected, observedRevisionAfter }, writer), code("OPERATION_CONFLICT"));
+      assert.deepEqual(store.readBytes(input.operationId), bytes);
+    });
+  }
 });

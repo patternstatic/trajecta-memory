@@ -13,7 +13,10 @@ export type OperationUpdate = Partial<Pick<LocalOperationRecordV1, "acceptance" 
 const ADJACENT = new Set(["created:inspected", "inspected:reserved", "inspected:receipt-committed", "reserved:kernel-resumed", "kernel-resumed:receipt-committed", "receipt-committed:target-consumed"]);
 function conflict(message: string): never { throw betaError("OPERATION_CONFLICT", message); }
 function doubt(message: string): never { throw betaError("OPERATION_IN_DOUBT", message); }
-function text(value: unknown, max: number): value is string { return typeof value === "string" && value.trim().length > 0 && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value); }
+// Match the kernel/packet text contract: bounded, nonblank ordinary work text may
+// contain line breaks and tabs. Only the inspection reason is single-line text.
+function text(value: unknown, max: number): value is string { return typeof value === "string" && value.trim().length > 0 && value.length <= max; }
+function inspectionReason(value: unknown): value is string { return text(value, 512) && !/[\u0000-\u001f\u007f]/.test(value); }
 function validIdentity(v: unknown): v is OperationIdentity { return !!v && typeof v === "object" && validOpaqueId((v as OperationIdentity).operationId, "operation") && validOpaqueId((v as OperationIdentity).envelopeId, "envelope") && validOpaqueId((v as OperationIdentity).targetId, "target") && validDigest((v as OperationIdentity).attemptDigest); }
 function sameIdentity(left: OperationIdentity, right: OperationIdentity): boolean { return left.operationId === right.operationId && left.envelopeId === right.envelopeId && left.targetId === right.targetId && left.attemptDigest === right.attemptDigest; }
 function revision(value: unknown): value is number { return Number.isSafeInteger(value) && (value as number) >= 0; }
@@ -31,7 +34,7 @@ function validKernel(value: unknown, operationId: string): boolean {
     || !revision(work.revision) || (work.activeBranchId !== null && !validOpaqueId(work.activeBranchId)) || !Array.isArray(work.branches) || work.branches.length > 100 || !work.branches.every(branch)
     || !Array.isArray(work.openLoops) || work.openLoops.length > 20 || !work.openLoops.every((v: unknown) => text(v, 500)) || !nullableText(work.nextAction, 1000) || !surface(work.lastSurface) || !validTimestamp(work.createdAt) || !validTimestamp(work.updatedAt)) return false;
   return exactObject(delta, ["id", "operationId", "workId", "revision", "kind", "summary", "surface", "branchId", "targetSurface", "provenance", "createdAt"])
-    && validOpaqueId(delta.id) && delta.operationId === operationId && delta.workId === work.id && delta.revision === work.revision && delta.kind === "resume" && text(delta.summary, 1000)
+    && validOpaqueId(delta.id) && delta.operationId === `${operationId}.kernel` && delta.workId === work.id && delta.revision === work.revision && delta.kind === "resume" && text(delta.summary, 1000)
     && surface(delta.surface) && canonicalJson(delta.surface) === canonicalJson(work.lastSurface) && delta.branchId === work.activeBranchId && (delta.targetSurface === null || delta.targetSurface === "local" || delta.targetSurface === "cloud")
     && Array.isArray(delta.provenance) && delta.provenance.length <= 20 && delta.provenance.every((v: unknown) => validOpaqueId(v)) && validTimestamp(delta.createdAt);
 }
@@ -56,7 +59,7 @@ function validRecord(value: unknown): value is LocalOperationRecordV1 {
     if (resumed && record.kernelResult && (record.receipt.workId !== record.kernelResult.work.id || record.receipt.branchId !== record.kernelResult.work.activeBranchId || record.receipt.observedRevisionAfter !== record.kernelResult.work.revision)) return false;
     if (!resumed && (states.includes("target-consumed") || record.state === "inspection-required")) return false;
   } else if (record.receipt !== null) return false;
-  return record.state === "inspection-required" ? text(record.doubtReason, 512) : record.doubtReason === null;
+  return record.state === "inspection-required" ? inspectionReason(record.doubtReason) : record.doubtReason === null;
 }
 
 export class OperationJournal {
@@ -113,7 +116,7 @@ export class OperationJournal {
   }
 
   markInspectionRequired(operationId: string, reason: string, writer: WriterLease): LocalOperationRecordV1 {
-    if (!text(reason, 512)) conflict("Inspection reason must be bounded nonempty text.");
+    if (!inspectionReason(reason)) conflict("Inspection reason must be bounded nonempty text.");
     return this.transition(operationId, "inspection-required", { doubtReason: reason }, writer);
   }
 

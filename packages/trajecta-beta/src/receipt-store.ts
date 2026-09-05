@@ -28,7 +28,7 @@ export function validLocalResumeReceipt(value: unknown): value is LocalResumeRec
     || !revision(value.expectedRevision) || (value.observedRevisionBefore !== null && !revision(value.observedRevisionBefore)) || (value.observedRevisionAfter !== null && !revision(value.observedRevisionAfter))
     || !references(value.provenance) || !references(value.evidence) || !validTimestamp(value.createdAt)) return false;
   if (value.outcome === "accepted") return value.code === "RESUMED" && value.branchId !== null && value.observedRevisionBefore === value.expectedRevision && value.observedRevisionAfter === value.expectedRevision + 1;
-  return value.outcome === "rejected" && (value.code === "REVISION_CONFLICT" || value.code === "BRANCH_MISMATCH") && value.observedRevisionAfter === null;
+  return value.outcome === "rejected" && (value.code === "REVISION_CONFLICT" || value.code === "BRANCH_MISMATCH") && value.observedRevisionAfter === value.observedRevisionBefore;
 }
 
 /** Read-only even when the root or category is absent; never create state during inspection. */

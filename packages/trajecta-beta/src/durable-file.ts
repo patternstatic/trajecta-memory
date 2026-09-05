@@ -210,6 +210,13 @@ export function readPrivateBytes(file: string): { bytes: Buffer; dev: number; in
     if (final.size !== initial.size || final.dev !== initial.dev || final.ino !== initial.ino || final.mode !== initial.mode || final.mtimeMs !== initial.mtimeMs || final.ctimeMs !== initial.ctimeMs) {
       throw betaError("OPERATION_IN_DOUBT", "Private state file changed during read.");
     }
+    // Moving an ancestor need not change the opened file's own metadata. Check
+    // the entire private path again and bind the final name to this descriptor.
+    assertPrivateDirectory(path.dirname(file));
+    const named = lstatSync(file);
+    if (named.isSymbolicLink() || !named.isFile() || named.dev !== final.dev || named.ino !== final.ino || named.mode !== final.mode) {
+      throw betaError("OPERATION_IN_DOUBT", "Private state path no longer matches its opened file.");
+    }
     return { bytes, dev: final.dev, ino: final.ino };
   } catch (error) {
     if (error instanceof BetaError && error.code === "OPERATION_IN_DOUBT") throw error;
