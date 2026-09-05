@@ -104,7 +104,11 @@ export class LocalResumeService {
       if (runtime.accepted !== true) throw betaError("USER_ACCEPTANCE_REQUIRED", "Explicit runtime acceptance is required for this current packet.");
       this.options.journal.open({ operationId: envelope.operationId, attemptDigest, envelopeId: envelope.envelopeId, targetId: envelope.target.targetId }, writer);
       this.options.journal.transition(envelope.operationId, "inspected", {}, writer);
-      this.options.registry.reserve(envelope.target, envelope.operationId, attemptDigest, this.clock, envelope.expiresAt);
+      if (alreadyReserved) {
+        this.checked(envelope.operationId, writer, () => this.options.registry.assertFreshReservation(envelope.target, envelope.operationId, attemptDigest, this.clock, envelope.expiresAt));
+      } else {
+        this.options.registry.reserve(envelope.target, envelope.operationId, attemptDigest, this.clock, envelope.expiresAt);
+      }
       const reserved = this.options.journal.transition(envelope.operationId, "reserved", { acceptance: { source: "runtime-flag", observedAt: this.clock().toISOString() } }, writer);
       this.options.fault?.("after-target-reserve");
       return this.reconcile(envelope, reserved, writer);

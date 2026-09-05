@@ -239,6 +239,17 @@ export class TargetRegistry {
     });
   }
 
+  /** An early SDK operation must prove freshness again before it persists acceptance. */
+  assertFreshReservation(card: LocalWorkspaceTargetCardV1, operationId: string, attemptDigest: string, clock: () => Date, authorizationExpiresAt: string): void {
+    if (!opaqueId(operationId, "operation:") || !SHA256.test(attemptDigest) || !timestamp(authorizationExpiresAt)) throw betaError("OPERATION_CONFLICT", "The reservation identity or authorization deadline is invalid.");
+    this.withLockedRecord(card, "reserve", record => {
+      if (record.state !== "reserved" || record.operationId !== operationId || record.attemptDigest !== attemptDigest) inDoubt("The exact durable target reservation is missing.");
+      const now = clock();
+      this.requireFresh(record, now);
+      if (Date.parse(authorizationExpiresAt) <= now.getTime()) throw betaError("TARGET_EXPIRED", "The resume authorization has expired.");
+    });
+  }
+
   assertConsumed(card: LocalWorkspaceTargetCardV1, operationId: string, attemptDigest: string, receiptId: string): void {
     this.withLockedRecord(card, undefined, record => {
       if (record.state !== "consumed" || record.operationId !== operationId || record.attemptDigest !== attemptDigest || record.receiptId !== receiptId) inDoubt("The exact durable target consumption is missing.");

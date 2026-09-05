@@ -67,6 +67,24 @@ for (const deadline of ["target", "envelope"] as const) test(`final reservation 
   assert.equal(f.journal.lookup(operationId)?.acceptance, null);
 });
 
+for (const deadline of ["target", "envelope"] as const) test(`early reserved target rechecks ${deadline} expiry under lock before persisting new acceptance`, async t => {
+  const f = fixture(t);
+  const payload = envelopePayload(f.envelope);
+  if (deadline === "envelope") payload.expiresAt = "2026-09-05T00:01:00.000Z";
+  const envelope = buildLocalResumeEnvelope(payload); fs.writeFileSync(f.file, JSON.stringify(envelope));
+  const interruptedRegistry = new TargetRegistry({ stateRoot: f.stateRoot, clock: f.clock, onAfterJournalAppend: () => { throw new Error("target boundary"); } });
+  await assert.rejects(f.service({ registry: interruptedRegistry }).resumeFile(f.file, { accepted: true }), /target boundary/);
+  assert.equal(f.journal.lookup(operationId)?.state, "inspected"); assert.equal(f.journal.lookup(operationId)?.acceptance, null);
+  const targetBefore = tree(path.join(f.stateRoot, "targets"));
+  const registry = new TargetRegistry({ stateRoot: f.stateRoot, clock: f.clock, onTargetLockAcquired: transition => {
+    if (transition === "reserve") f.setNow(envelope.expiresAt);
+  } });
+  await assert.rejects(f.service({ registry }).resumeFile(f.file, { accepted: true }), errorCode("OPERATION_IN_DOUBT"));
+  assert.equal(f.journal.lookup(operationId)?.state, "inspection-required"); assert.equal(f.journal.lookup(operationId)?.acceptance, null);
+  assert.equal(f.deltas().length, 0); assert.equal(f.receipts.readBytes(operationId), null);
+  assert.deepEqual(tree(path.join(f.stateRoot, "targets")), targetBefore);
+});
+
 test("exact orphan reservation is quarantined once without inferring missing acceptance", async t => {
   const f = fixture(t);
   await assert.rejects(f.service({ fault: p => { if (p === "after-target-reserve") throw new Error("fault"); } }).resumeFile(f.file, { accepted: true }), /fault/);
@@ -130,6 +148,19 @@ test("registry samples its default clock under lock and exact reservation retry 
   f.registry.reserve(f.target, operationId, digest, new Date(instant));
   const before = tree(f.stateRoot);
   f.registry.reserve(f.target, operationId, digest, () => assert.fail("exact reserved replay cannot resample time"), instant);
+  assert.deepEqual(tree(f.stateRoot), before);
+});
+
+test("fresh-reservation assertion checks exact identity and both deadlines without durable writes", t => {
+  const f = fixture(t), digest = f.envelope.integrity.canonicalPayloadDigest;
+  f.registry.reserve(f.target, operationId, digest);
+  const before = tree(f.stateRoot); let samples = 0;
+  f.registry.assertFreshReservation(f.target, operationId, digest, () => { samples++; return f.clock(); }, f.envelope.expiresAt);
+  assert.equal(samples, 1);
+  assert.throws(() => f.registry.assertFreshReservation(f.target, "operation:other", digest, () => assert.fail("mismatched identity cannot sample"), f.envelope.expiresAt), errorCode("OPERATION_IN_DOUBT"));
+  assert.throws(() => f.registry.assertFreshReservation(f.target, operationId, "b".repeat(64), f.clock, f.envelope.expiresAt), errorCode("OPERATION_IN_DOUBT"));
+  assert.throws(() => f.registry.assertFreshReservation(f.target, operationId, digest, f.clock, "invalid"), errorCode("OPERATION_CONFLICT"));
+  assert.throws(() => f.registry.assertFreshReservation(f.target, operationId, digest, f.clock, instant), errorCode("TARGET_EXPIRED"));
   assert.deepEqual(tree(f.stateRoot), before);
 });
 
