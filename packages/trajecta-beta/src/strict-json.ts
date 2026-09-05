@@ -50,7 +50,7 @@ class JsonParser {
       if (this.text[this.index] !== '"') this.invalid("Object keys must be JSON strings.");
       const key = this.parseString();
       if (keys.has(key)) {
-        throw betaError("DUPLICATE_KEY", `Duplicate object key: ${key}`);
+        throw betaError("DUPLICATE_KEY", "Input contains duplicate object keys.");
       }
       keys.add(key);
       this.skipWhitespace();

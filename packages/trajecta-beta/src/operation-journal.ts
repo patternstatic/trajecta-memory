@@ -94,6 +94,27 @@ export class OperationJournal {
     assertWriterLease(writer, this.stateRoot, operationId);
     const before = this.lookup(operationId);
     if (!before) doubt("Operation must be opened before transition.");
+    const next = this.draftTransition(before, state, update);
+    if (next === before) return before;
+    assertWriterLease(writer, this.stateRoot, operationId);
+    writeJsonAtomic(this.file(operationId), next);
+    return this.verifyWrite(next, writer);
+  }
+
+  /** Prove every later accepted-operation snapshot fits before any new reservation or kernel mutation. */
+  assertTransitionChainPersistable(operationId: string, transitions: ReadonlyArray<{ state: OperationState; update: OperationUpdate }>, writer: WriterLease): readonly number[] {
+    assertWriterLease(writer, this.stateRoot, operationId);
+    let record = this.lookup(operationId);
+    if (!record) doubt("Operation must be opened before transition.");
+    const bytes: number[] = [];
+    for (const transition of transitions) {
+      record = this.draftTransition(record, transition.state, transition.update);
+      bytes.push(Buffer.byteLength(JSON.stringify(record), "utf8"));
+    }
+    return bytes;
+  }
+
+  private draftTransition(before: LocalOperationRecordV1, state: OperationState, update: OperationUpdate): LocalOperationRecordV1 {
     if (!update || typeof update !== "object" || Array.isArray(update) || Object.keys(update).some((key) => !["acceptance", "kernelResult", "receipt", "doubtReason"].includes(key))) conflict("Operation update has unsupported fields.");
     let next: LocalOperationRecordV1;
     try { next = structuredClone({ ...before, ...update, state }); } catch { conflict("Operation update is not serializable."); }
@@ -110,9 +131,7 @@ export class OperationJournal {
     }
     next.transitions.push({ state, observedAt: this.clock().toISOString() });
     this.validateWrite(next);
-    assertWriterLease(writer, this.stateRoot, operationId);
-    writeJsonAtomic(this.file(operationId), next);
-    return this.verifyWrite(next, writer);
+    return next;
   }
 
   markInspectionRequired(operationId: string, reason: string, writer: WriterLease): LocalOperationRecordV1 {

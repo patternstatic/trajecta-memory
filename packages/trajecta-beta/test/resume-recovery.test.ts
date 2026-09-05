@@ -5,13 +5,14 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { TrajectaStore } from "../../../src/store.ts";
-import { buildLocalResumeEnvelope, envelopePayload } from "../src/envelope.ts";
+import { buildLocalResumeEnvelope, deriveLocalResumeReceiptReferences, envelopePayload } from "../src/envelope.ts";
+import type { LocalResumeEnvelopeV1, LocalResumeReceiptV1 } from "../src/contracts.ts";
 import { canonicalJson } from "../src/canonical.ts";
 import { TargetRegistry } from "../src/target-registry.ts";
 import { OperationJournal } from "../src/operation-journal.ts";
 import { ReceiptStore } from "../src/receipt-store.ts";
 import { observeWorkspace, sha256 } from "../src/workspace.ts";
-import { TrajectaKernelPort } from "../src/kernel-port.ts";
+import { createLocalKernelPort, toKernelResumeInput, TrajectaKernelPort, type KernelResumeResult } from "../src/kernel-port.ts";
 import { LocalResumeService, type LocalResumeServiceOptions } from "../src/resume-service.ts";
 import { withWriterLock } from "../src/writer-lock.ts";
 import { errorCode, finalizePacketBudget } from "./helpers.ts";
@@ -29,7 +30,7 @@ function tree(root: string): unknown {
 function fixture(t: test.TestContext) {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "trajecta-sdk-recovery-")));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const cwd = path.join(root, "repo"), stateRoot = path.join(root, "sdk"), kernelRoot = path.join(root, "kernel");
+  const cwd = path.join(root, "repo"), stateRoot = path.join(root, "sdk"), kernelRoot = path.join(stateRoot, "kernel");
   fs.mkdirSync(cwd); execFileSync("git", ["init", "-b", "main", cwd], { stdio: "ignore" });
   execFileSync("git", ["-C", cwd, "remote", "add", "origin", "https://example.invalid/team/repo.git"]);
   let now = new Date(instant);
@@ -44,14 +45,132 @@ function fixture(t: test.TestContext) {
     createdAt: instant, expiresAt: target.expiresAt, target, packet: store.transfer(opened.work.id, "resume", "local") });
   const file = path.join(root, "handoff.json"); fs.writeFileSync(file, JSON.stringify(envelope));
   const journal = new OperationJournal({ stateRoot, clock }), receipts = new ReceiptStore({ stateRoot });
-  const options = { stateRoot, cwd, registry, journal, receipts, clock, kernel: new TrajectaKernelPort(store) };
-  const service = (extra: Partial<LocalResumeServiceOptions> = {}) => new LocalResumeService({ ...options, kernel: new TrajectaKernelPort(new TrajectaStore(kernelRoot, clock)), ...extra });
+  const options = { stateRoot, cwd, registry, journal, receipts, clock, kernel: createLocalKernelPort(stateRoot, clock) };
+  const service = (extra: Partial<LocalResumeServiceOptions> = {}) => new LocalResumeService({ ...options, kernel: createLocalKernelPort(stateRoot, clock), ...extra });
   const targetFile = path.join(stateRoot, "targets", `${sha256(target.targetId)}.journal`);
   const targetRecord = () => JSON.parse(fs.readFileSync(targetFile, "utf8").trim().split("\n").at(-1)!);
   const deltas = () => new TrajectaStore(kernelRoot, clock).history(opened.work.id).filter(d => d.operationId === `${operationId}.kernel`);
   return { root, cwd, stateRoot, kernelRoot, store, target, envelope, file, registry, journal, receipts, options, service, targetFile, targetRecord, deltas,
     workId: opened.work.id, clock, setNow: (value: string) => { now = new Date(value); }, expire: () => { now = new Date("2026-09-06T00:00:00.000Z"); } };
 }
+
+function boundedOversizedCurrent(f: ReturnType<typeof fixture>, operationId: string, variant: "full-work" | "near-receipt" | "historic-inactive-shape") {
+  let current = f.store.getWork(f.workId);
+  const branches = variant === "near-receipt" ? 8 : variant === "full-work" ? 12 : 0;
+  for (let index = 0; index < branches; index++) {
+    current = f.store.capture({ operationId: `operation:${operationId.split(":")[1]}-branch${index}`, workId: f.workId, expectedRevision: current.revision, surface,
+      kind: "branch_open", summary: "Another branch", nextAction: "Continue exact work",
+      branch: { label: `branch${index}`, purpose: "p".repeat(500), cues: ["c".repeat(500)], returnPoint: "r".repeat(500) } }).work;
+  }
+  if (variant === "historic-inactive-shape") {
+    current = f.store.capture({ operationId: `operation:${operationId.split(":")[1]}-hidden`, workId: f.workId, expectedRevision: current.revision, surface,
+      kind: "branch_open", summary: "Open a hidden historic branch", nextAction: "Park the historic branch",
+      branch: { label: "historic", purpose: "small", cues: Array.from({ length: 21 }, () => "old"), returnPoint: "Return" } }).work;
+    current = f.store.capture({ operationId: `operation:${operationId.split(":")[1]}-park`, workId: f.workId, expectedRevision: current.revision, surface,
+      kind: "branch_park", summary: "Park historic branch", nextAction: "Open the small current branch", branchId: current.activeBranchId! }).work;
+    current = f.store.capture({ operationId: `operation:${operationId.split(":")[1]}-current`, workId: f.workId, expectedRevision: current.revision, surface,
+      kind: "branch_open", summary: "Current branch", nextAction: "Continue exact work",
+      branch: { label: "current", purpose: "small", cues: ["current"], returnPoint: "Return" } }).work;
+  }
+  const packet = f.store.transfer(f.workId, "resume", "local");
+  assert.ok(Buffer.byteLength(JSON.stringify(packet), "utf8") <= 6_000);
+  const envelope = buildLocalResumeEnvelope({ schema: "trajecta.local-resume-envelope/v1", envelopeId: `envelope:${operationId.split(":")[1]}`,
+    operationId, createdAt: instant, expiresAt: f.target.expiresAt, target: f.target, packet });
+  const file = path.join(f.root, `${operationId.split(":")[1]}.json`); fs.writeFileSync(file, JSON.stringify(envelope));
+  return { current, envelope, file };
+}
+
+function projectedKernelResult(f: ReturnType<typeof fixture>, envelope: LocalResumeEnvelopeV1): KernelResumeResult {
+  const root = path.join(f.root, `projection-${envelope.operationId.split(":")[1]}`);
+  fs.cpSync(f.kernelRoot, root, { recursive: true });
+  try { return new TrajectaStore(root, f.clock).resume(toKernelResumeInput(envelope)); }
+  finally { fs.rmSync(root, { recursive: true, force: true }); }
+}
+
+function acceptedReceipt(envelope: LocalResumeEnvelopeV1, createdAt: string): LocalResumeReceiptV1 {
+  const attemptDigest = envelope.integrity.canonicalPayloadDigest;
+  return {
+    schema: "trajecta.local-resume-receipt/v1",
+    receiptId: `receipt:${sha256(`${envelope.operationId}:${attemptDigest}:accepted:RESUMED`).slice(0, 32)}`,
+    envelopeId: envelope.envelopeId,
+    operationId: envelope.operationId,
+    attemptDigest,
+    outcome: "accepted",
+    code: "RESUMED",
+    targetId: envelope.target.targetId,
+    repositoryFingerprint: envelope.target.workspace.repositoryFingerprint,
+    stateRootFingerprint: envelope.target.workspace.stateRootFingerprint,
+    workId: envelope.packet.work.id,
+    branchId: envelope.packet.activeBranch!.id,
+    packetId: envelope.packet.packetId,
+    expectedRevision: envelope.packet.resume.expectedRevision,
+    observedRevisionBefore: envelope.packet.resume.expectedRevision,
+    observedRevisionAfter: envelope.packet.resume.expectedRevision + 1,
+    ...deriveLocalResumeReceiptReferences(envelope.packet),
+    createdAt,
+  };
+}
+
+function assertKernelSnapshotFitsButReceiptOverflows(f: ReturnType<typeof fixture>, envelope: LocalResumeEnvelopeV1): void {
+  const stateRoot = path.join(f.root, "admission-probe"), operationId = envelope.operationId;
+  const journal = new OperationJournal({ stateRoot, clock: f.clock });
+  const result = projectedKernelResult(f, envelope), receipt = acceptedReceipt(envelope, f.clock().toISOString());
+  withWriterLock({ stateRoot, operationId, clock: f.clock }, writer => {
+    journal.open({ operationId, attemptDigest: envelope.integrity.canonicalPayloadDigest, envelopeId: envelope.envelopeId, targetId: envelope.target.targetId }, writer);
+    journal.transition(operationId, "inspected", {}, writer);
+    const beforeReceipt = journal.assertTransitionChainPersistable(operationId, [
+      { state: "reserved", update: { acceptance: { source: "runtime-flag", observedAt: f.clock().toISOString() } } },
+      { state: "kernel-resumed", update: { kernelResult: result } },
+    ], writer);
+    assert.ok(beforeReceipt.at(-1)! <= 16 * 1024, "kernel-resumed snapshot must fit before adding the receipt");
+    assert.throws(() => journal.assertTransitionChainPersistable(operationId, [
+      { state: "reserved", update: { acceptance: { source: "runtime-flag", observedAt: f.clock().toISOString() } } },
+      { state: "kernel-resumed", update: { kernelResult: result } },
+      { state: "receipt-committed", update: { receipt } },
+      { state: "target-consumed", update: {} },
+    ], writer), errorCode("OPERATION_CONFLICT"));
+  });
+}
+
+for (const variant of ["full-work", "near-receipt", "historic-inactive-shape"] as const) test(`bounded ${variant} journal admission rejects before reserving or resuming work`, async t => {
+  const f = fixture(t), operationId = `operation:journal-${variant}`;
+  const candidate = boundedOversizedCurrent(f, operationId, variant);
+  const packetBytes = Buffer.byteLength(JSON.stringify(candidate.envelope.packet), "utf8");
+  assert.ok(packetBytes <= 6_000, "the transfer packet remains within the public 6 KiB envelope budget");
+  if (variant === "full-work") assert.ok(Buffer.byteLength(JSON.stringify(candidate.current), "utf8") > 16 * 1024, "the complete live WorkItem exceeds the journal's 16 KiB durable JSON bound");
+  if (variant === "near-receipt") assertKernelSnapshotFitsButReceiptOverflows(f, candidate.envelope);
+  if (variant === "historic-inactive-shape") {
+    assert.ok(Buffer.byteLength(JSON.stringify(candidate.current), "utf8") <= 16 * 1024, "the inactive-branch incompatibility is structural, not a size overflow");
+    assert.equal(candidate.current.branches.find(branch => branch.label === "historic")!.cues.length, 21);
+    assert.ok(candidate.envelope.packet.activeBranch!.cues.length <= 20, "the transmitted active branch is valid while the hidden historic branch is not");
+  }
+  const kernelBefore = tree(f.kernelRoot), targetBefore = tree(path.join(f.stateRoot, "targets"));
+  await assert.rejects(f.service().resumeFile(candidate.file, { accepted: true }), errorCode("OPERATION_CONFLICT"));
+  assert.equal(f.store.getWork(f.workId).revision, candidate.current.revision);
+  assert.equal(f.deltas().filter(delta => delta.operationId === `${operationId}.kernel`).length, 0);
+  assert.equal(f.targetRecord().state, "issued"); assert.equal(f.receipts.readBytes(operationId), null);
+  assert.deepEqual(tree(f.kernelRoot), kernelBefore); assert.deepEqual(tree(path.join(f.stateRoot, "targets")), targetBefore);
+  const afterFirst = [tree(f.kernelRoot), tree(path.join(f.stateRoot, "targets")), tree(path.join(f.stateRoot, "operations")), tree(path.join(f.stateRoot, "receipts"))];
+  await assert.rejects(f.service().resumeFile(candidate.file, { accepted: true }), errorCode("OPERATION_CONFLICT"));
+  assert.deepEqual([tree(f.kernelRoot), tree(path.join(f.stateRoot, "targets")), tree(path.join(f.stateRoot, "operations")), tree(path.join(f.stateRoot, "receipts"))], afterFirst);
+});
+
+test("a preexisting reserved oversized operation stays byte-identical before admission rejects", async t => {
+  const f = fixture(t), operationId = "operation:journal-existing-reserved";
+  const candidate = boundedOversizedCurrent(f, operationId, "full-work");
+  const digest = candidate.envelope.integrity.canonicalPayloadDigest;
+  await withWriterLock({ stateRoot: f.stateRoot, operationId, clock: f.clock }, writer => {
+    f.journal.open({ operationId, attemptDigest: digest, envelopeId: candidate.envelope.envelopeId, targetId: candidate.envelope.target.targetId }, writer);
+    f.journal.transition(operationId, "inspected", {}, writer);
+    f.registry.reserve(candidate.envelope.target, operationId, digest, f.clock, candidate.envelope.expiresAt);
+    f.journal.transition(operationId, "reserved", { acceptance: { source: "runtime-flag", observedAt: f.clock().toISOString() } }, writer);
+  });
+  const before = [tree(f.kernelRoot), tree(path.join(f.stateRoot, "targets")), tree(path.join(f.stateRoot, "operations")), tree(path.join(f.stateRoot, "receipts"))];
+  await assert.rejects(f.service().resumeFile(candidate.file, { accepted: false }), errorCode("OPERATION_CONFLICT"));
+  assert.deepEqual([tree(f.kernelRoot), tree(path.join(f.stateRoot, "targets")), tree(path.join(f.stateRoot, "operations")), tree(path.join(f.stateRoot, "receipts"))], before);
+  await assert.rejects(f.service().resumeFile(candidate.file, { accepted: false }), errorCode("OPERATION_CONFLICT"));
+  assert.deepEqual([tree(f.kernelRoot), tree(path.join(f.stateRoot, "targets")), tree(path.join(f.stateRoot, "operations")), tree(path.join(f.stateRoot, "receipts"))], before);
+});
 
 for (const deadline of ["target", "envelope"] as const) test(`final reservation rejects ${deadline} expiry reached while acquiring target lock`, async t => {
   const f = fixture(t);

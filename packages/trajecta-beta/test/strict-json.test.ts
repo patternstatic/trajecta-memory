@@ -36,7 +36,7 @@ test("strict reader rejects before parsing when the file exceeds 16 KiB", () => 
 });
 
 test("strict reader rejects duplicate keys, depth nine, trailing data, and invalid UTF-8", () => {
-  assert.throws(() => parseStrictJsonText('{"a":1,"a":2}'), errorCode("DUPLICATE_KEY"));
+  assert.throws(() => parseStrictJsonText('{"a":1,"a":2}'), (error: unknown) => errorCode("DUPLICATE_KEY")(error) && (error as BetaError).message === "Input contains duplicate object keys." );
   assert.throws(() => parseStrictJsonText('{"\\u0061":1,"a":2}'), errorCode("DUPLICATE_KEY"));
   assert.throws(() => parseStrictJsonText('[[[[[[[[[0]]]]]]]]]'), errorCode("JSON_TOO_DEEP"));
   assert.throws(() => parseStrictJsonText('{"a":1} true'), errorCode("INVALID_JSON"));

@@ -3,7 +3,7 @@ import { canonicalJson } from "./canonical.ts";
 import type { LocalOperationRecordV1, LocalResumeEnvelopeV1, LocalResumeInspectionV1, LocalResumeReceiptV1, ResumeFaultPoint } from "./contracts.ts";
 import { assertEnvelopeFresh, captureLocalResumeEnvelopeFile, deriveLocalResumeReceiptReferences, readLocalResumeEnvelopeBytes } from "./envelope.ts";
 import { betaError } from "./errors.ts";
-import { toKernelResumeInput, type LocalKernelPort } from "./kernel-port.ts";
+import { toKernelResumeInput, type KernelResumeResult, type LocalKernelPort } from "./kernel-port.ts";
 import type { OperationJournal } from "./operation-journal.ts";
 import type { ReceiptStore } from "./receipt-store.ts";
 import type { TargetRegistry } from "./target-registry.ts";
@@ -104,6 +104,7 @@ export class LocalResumeService {
       if (runtime.accepted !== true) throw betaError("USER_ACCEPTANCE_REQUIRED", "Explicit runtime acceptance is required for this current packet.");
       this.options.journal.open({ operationId: envelope.operationId, attemptDigest, envelopeId: envelope.envelopeId, targetId: envelope.target.targetId }, writer);
       this.options.journal.transition(envelope.operationId, "inspected", {}, writer);
+      this.assertAcceptedChainPersistable(verified, work, writer);
       if (alreadyReserved) {
         this.checked(envelope.operationId, writer, () => this.options.registry.assertFreshReservation(envelope.target, envelope.operationId, attemptDigest, this.clock, envelope.expiresAt));
       } else {
@@ -125,6 +126,54 @@ export class LocalResumeService {
     if (record.operationId !== envelope.operationId || record.attemptDigest !== envelope.integrity.canonicalPayloadDigest || record.envelopeId !== envelope.envelopeId || record.targetId !== envelope.target.targetId) {
       throw betaError("OPERATION_CONFLICT", "Operation ID is bound to a different captured attempt.");
     }
+  }
+
+  private assertAcceptedChainPersistable(envelope: LocalResumeEnvelopeV1, work: WorkItem, writer: WriterLease): void {
+    const current = this.options.journal.lookup(envelope.operationId);
+    if (!current || (current.state !== "inspected" && current.state !== "reserved")) {
+      throw betaError("OPERATION_IN_DOUBT", "Accepted operation evidence is unavailable for persistability admission.");
+    }
+    const predicted = this.predictKernelResult(envelope, work);
+    const receipt = this.makeReceipt(envelope, "accepted", "RESUMED", envelope.packet.resume.expectedRevision, this.clock().toISOString());
+    const transitions = current.state === "inspected" ? [
+      { state: "reserved" as const, update: { acceptance: { source: "runtime-flag" as const, observedAt: this.clock().toISOString() } } },
+      { state: "kernel-resumed", update: { kernelResult: predicted } },
+      { state: "receipt-committed", update: { receipt } },
+      { state: "target-consumed", update: {} },
+    ] : [
+      { state: "kernel-resumed" as const, update: { kernelResult: predicted } },
+      { state: "receipt-committed", update: { receipt } },
+      { state: "target-consumed", update: {} },
+    ];
+    this.options.journal.assertTransitionChainPersistable(envelope.operationId, transitions, writer);
+  }
+
+  private predictKernelResult(envelope: LocalResumeEnvelopeV1, work: WorkItem): KernelResumeResult {
+    const input = toKernelResumeInput(envelope), observedAt = this.clock().toISOString();
+    const next = structuredClone(work);
+    next.revision += 1;
+    next.status = "active";
+    next.lastSurface = structuredClone(input.surface);
+    next.updatedAt = observedAt;
+    if (input.instruction) next.instruction = input.instruction.trim();
+    return {
+      work: next,
+      delta: {
+        // The core generates a UUID of this exact fixed-width shape. Its value
+        // cannot change snapshot size, which is the only admission property.
+        id: "delta:00000000-0000-4000-8000-000000000000",
+        operationId: input.operationId,
+        workId: input.workId,
+        revision: next.revision,
+        kind: "resume",
+        summary: input.instruction?.trim() ?? `Resumed on ${input.surface.kind}:${input.surface.name}`,
+        surface: structuredClone(input.surface),
+        branchId: next.activeBranchId,
+        targetSurface: null,
+        provenance: [],
+        createdAt: observedAt,
+      },
+    };
   }
 
   private quarantine(operationId: string, writer: WriterLease): never {
@@ -154,6 +203,16 @@ export class LocalResumeService {
         registry.assertReservation(envelope.target, operationId, digest);
         if (receipts.readBytes(operationId)) throw new Error("Premature receipt");
       });
+      // A reservation may predate the admission gate. If its kernel operation
+      // has not started, prove this exact live work can still be journaled
+      // through receipt and consumption before invoking the kernel. A kernel
+      // WAL recovery already in progress must keep its existing recovery path.
+      const input = toKernelResumeInput(envelope);
+      const liveWork = this.checked(operationId, writer, () => kernel.getWork(input.workId));
+      const hasKernelDelta = this.checked(operationId, writer, () => kernel.history(input.workId).some(delta => delta.operationId === input.operationId));
+      if (liveWork.revision === input.expectedRevision && !hasKernelDelta) {
+        this.assertAcceptedChainPersistable(envelope, liveWork, writer);
+      }
       let result;
       try { result = kernel.resume(toKernelResumeInput(envelope)); }
       catch (error) {

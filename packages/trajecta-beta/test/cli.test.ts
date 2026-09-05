@@ -203,6 +203,20 @@ test("unknown commands, flags and missing values have bounded two-line errors", 
   assert.deepEqual(tree(root), before);
 });
 
+test("duplicate keys never echo candidate text or terminal controls through executable inspect or resume", t => {
+  const root = fixture(t), file = path.join(root, "duplicate.json");
+  const privateKey = "PRIVATE-PROMPT-SENTINEL\u001b[2J";
+  fs.writeFileSync(file, `{${JSON.stringify(privateKey)}:1,${JSON.stringify(privateKey)}:2}`);
+  const before = tree(root);
+  for (const args of [["inspect", file], ["resume", file, "--accept"]]) {
+    const result = run(root, ...args);
+    failure(result, "DUPLICATE_KEY");
+    assert.doesNotMatch(result.stderr, /PRIVATE-PROMPT-SENTINEL/);
+    assert.doesNotMatch(result.stderr, /\u001b/);
+    assert.deepEqual(tree(root), before);
+  }
+});
+
 test("unavailable output parents are user errors and do not issue targets", t => {
   const root = fixture(t), before = tree(root);
   failure(run(root, "host", "init", "--out", "missing/target.json"), "TARGET_MISMATCH");
