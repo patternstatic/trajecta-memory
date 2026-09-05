@@ -28,7 +28,8 @@ function makeWorkspace(remote = "https://user:token@github.com/patternstatic/tra
 }
 
 function registryFor(stateRoot: string, now: Date) {
-  return new TargetRegistry({ stateRoot, clock: () => now, randomBytes: (size) => Buffer.alloc(size, 7) });
+  let seed = 7;
+  return new TargetRegistry({ stateRoot, clock: () => now, randomBytes: (size) => Buffer.alloc(size, seed++) });
 }
 
 function targetRecordFile(observation: { stateRoot: string }, targetId: string) {
@@ -141,13 +142,56 @@ test("registry persists capability hash but never raw capability", () => {
   }
 });
 
+for (const [byte, prefix] of [[0xf8, "-"], [0xfc, "_"]] as const) {
+  test(`issued capability supports lookup and reservation when entropy starts with ${prefix}`, () => {
+    const fixture = makeWorkspace();
+    const now = new Date("2026-09-05T00:00:00.000Z");
+    const entropy = Buffer.alloc(32, byte);
+    const requests: number[] = [];
+    try {
+      const observation = observeWorkspace(fixture.root, fixture.stateRoot);
+      const registry = new TargetRegistry({
+        stateRoot: observation.stateRoot,
+        clock: () => now,
+        randomBytes: (size) => {
+          requests.push(size);
+          assert.ok(requests.length <= 2, "issuance must not retry entropy generation");
+          return Buffer.alloc(size, byte);
+        },
+      });
+      assert.equal(entropy.toString("base64url")[0], prefix);
+      const card = registry.issue(observation);
+      registry.lookup(card, now);
+      registry.reserve(card, "operation:prefix", "a".repeat(64), now);
+      assert.deepEqual(requests, [16, 32]);
+      assert.match(card.capability, /^capability:x[A-Za-z0-9_-]{43}$/);
+      assert.deepEqual(Buffer.from(card.capability.slice("capability:x".length), "base64url"), entropy);
+      const journal = targetRecordFile(observation, card.targetId);
+      const records = journalRecords(journal);
+      assert.deepEqual(records.map((record) => record.state), ["issued", "reserved"]);
+      for (const record of records) {
+        assert.equal(record.capabilityHash, createHash("sha256").update(card.capability).digest("hex"));
+      }
+      for (const file of [journal, targetLockFile(observation, card.targetId)]) {
+        assert.ok(!fs.readFileSync(file, "utf8").includes(card.capability));
+      }
+    } finally {
+      fs.rmSync(fixture.root, { recursive: true, force: true });
+      fs.rmSync(fixture.stateRoot, { recursive: true, force: true });
+    }
+  });
+}
+
 test("registry uses its built-in random source when one is not injected", () => {
   const fixture = makeWorkspace();
   try {
     const observation = observeWorkspace(fixture.root, fixture.stateRoot);
     const card = new TargetRegistry({ stateRoot: observation.stateRoot }).issue(observation);
     assert.match(card.targetId, /^target:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
-    assert.match(card.capability, /^capability:[A-Za-z0-9_-]{43}$/);
+    assert.match(card.capability, /^capability:x[A-Za-z0-9_-]{43}$/);
+    const registry = new TargetRegistry({ stateRoot: observation.stateRoot });
+    registry.lookup(card);
+    registry.reserve(card, "operation:default-random", "a".repeat(64));
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
     fs.rmSync(fixture.stateRoot, { recursive: true, force: true });
@@ -356,7 +400,7 @@ test("registry treats impossible issued, reserved, and consumed record combinati
   const now = new Date("2026-09-05T00:00:00.000Z");
   try {
     const observation = observeWorkspace(fixture.root, fixture.stateRoot);
-    const registry = new TargetRegistry({ stateRoot: observation.stateRoot, clock: () => now });
+    const registry = registryFor(observation.stateRoot, now);
     const cards = [registry.issue(observation), registry.issue(observation), registry.issue(observation)];
     const mutations = [
       { state: "issued", operationId: "operation:impossible", attemptDigest: "a".repeat(64), receiptId: null },
@@ -416,7 +460,7 @@ test("durable journal rejects extra record/workspace keys and non-increasing tim
   const now = new Date("2026-09-05T00:00:00.000Z");
   try {
     const observation = observeWorkspace(fixture.root, fixture.stateRoot);
-    const registry = new TargetRegistry({ stateRoot: observation.stateRoot, clock: () => now });
+    const registry = registryFor(observation.stateRoot, now);
     const cards = [registry.issue(observation), registry.issue(observation), registry.issue(observation), registry.issue(observation)];
     const changes = [
       (record: Record<string, unknown>) => ({ ...record, unexpected: true }),

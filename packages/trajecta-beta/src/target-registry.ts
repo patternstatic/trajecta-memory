@@ -162,7 +162,7 @@ export class TargetRegistry {
     const targetId = targetIdFromRandom(this.randomBytes(16));
     const randomCapability = this.randomBytes(32);
     if (randomCapability.byteLength !== 32) throw betaError("CAPABILITY_UNAVAILABLE", "The configured random source did not return capability bytes.");
-    const capability = `capability:${Buffer.from(randomCapability).toString("base64url")}`;
+    const capability = `capability:x${Buffer.from(randomCapability).toString("base64url")}`;
     const card: LocalWorkspaceTargetCardV1 = {
       schema: "trajecta.local-target/v1", targetId, capability, createdAt, expiresAt, registryFingerprint: this.registryFingerprint,
       workspace: { repository: observation.repository, repositoryFingerprint: observation.repositoryFingerprint, stateRootFingerprint: observation.stateRootFingerprint, branch: observation.branch },
