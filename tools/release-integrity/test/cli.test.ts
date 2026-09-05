@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseReleaseCli } from "../src/cli.ts";
+import { buildOptionsFromCli, parseReleaseCli } from "../src/cli.ts";
 
 const required = ["--private-key", "/outside/private.pem", "--public-key", "/outside/public.pem", "--git-bin", "/usr/bin/git", "--npm-cli", "/outside/npm-cli.js", "--build-commit", "a".repeat(40), "--release-instant", "2026-09-05T00:00:00Z", "--verification-instant", "2026-09-05T00:00:00Z", "--output-dir", "/outside/out"];
 
@@ -14,4 +14,12 @@ test("build CLI accepts one complete explicit frozen input set", () => {
 test("CLI rejects unknown, duplicate, empty, and missing frozen flags", () => {
   // Would fail if an ambiguous command selected an unreviewed default or silently ignored operator input.
   for (const argv of [["build", ...required, "--unknown", "x"], ["build", ...required, "--git-bin", "/again"], ["build", ...required.slice(0, -2)], ["build", ...required.map(value => value === "/outside/out" ? "" : value)]]) assert.throws(() => parseReleaseCli(argv));
+});
+
+test("CLI removes its command discriminator before passing exact build inputs", () => {
+  // Would fail if the CLI-only command field caused the strict build input gate to reject a legitimate invocation.
+  const parsed = parseReleaseCli(["build", ...required]);
+  assert.deepEqual(buildOptionsFromCli(parsed, "/source"), {
+    sourceRoot: "/source", privateKey: "/outside/private.pem", publicKey: "/outside/public.pem", gitBin: "/usr/bin/git", npmCli: "/outside/npm-cli.js", buildCommit: "a".repeat(40), releaseInstant: "2026-09-05T00:00:00Z", verificationInstant: "2026-09-05T00:00:00Z", outputDir: "/outside/out",
+  });
 });
