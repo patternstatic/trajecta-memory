@@ -473,3 +473,21 @@ Implementation is split into four plans and reviewed in order:
 The first implementation plan covers item 1 only. The later plans must consume
 its reviewed interfaces rather than replacing its authority model with easier
 packaging shortcuts.
+
+## Technical amendment — 2026-09-05 — package container ledger
+
+This amendment narrows the release-integrity mechanics without changing the
+offer, archive tree, license boundary, Customer-0 gate, or commercial-activation
+authority above.
+
+The `packages/trajecta-beta-0.1.0.tgz` archive member is a container rather
+than a source file. `MANIFEST.json` may therefore use the additional license
+class `mixed-container` **only** for that exact archive-relative path. Its
+manifest entry must bind a recursively audited member ledger containing each
+regular member of the bounded `.tgz` (member path, byte length, SHA-256, mode,
+and one of the four original classes: `apache-core`, `commercial-beta`,
+`documentation`, or `notice`). No inner member may use `mixed-container`, and
+no other outer archive member may use it. The auditor must validate the ledger
+against the compressed bytes before installation or extraction. This is a
+classification refinement only; the exact customer archive tree in section 9
+remains unchanged.
