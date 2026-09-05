@@ -64,7 +64,7 @@ function tar(entries: Array<{ name: string; data?: Buffer; type?: string; mode?:
   const parts: Buffer[] = [];
   for (const entry of entries) {
     const data = entry.data ?? Buffer.alloc(0);
-    parts.push(header(entry.name, data, entry.type, entry.mode));
+    parts.push(header(entry.name.startsWith("../") ? entry.name : `package/${entry.name}`, data, entry.type, entry.mode));
     parts.push(data);
     const padding = (512 - (data.length % 512)) % 512;
     if (padding) parts.push(Buffer.alloc(padding));
@@ -99,7 +99,7 @@ test("stores the npm-required package/ tar prefix without changing logical ledge
   const staged = temporaryPackage();
   const packed = packPackage({ packageRoot: staged.root, members: staged.members, releaseInstant: instant });
   assert.deepEqual(auditTgz(packed.tgz, { releaseInstant: instant, expectedMembers: staged.members, packagePrefix: "package/" }).memberLedger, staged.members);
-  expectCode(() => auditTgz(packed.tgz, { releaseInstant: instant, expectedMembers: staged.members }), "INVALID_TAR_MODE");
+  assert.deepEqual(auditTgz(packed.tgz, { releaseInstant: instant, expectedMembers: staged.members }).memberLedger, staged.members);
 });
 
 test("rejects tar traversal, duplicate/case-colliding names, links, PAX records, and bad gzip headers", () => {

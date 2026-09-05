@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { stripTypeScriptTypes } from "node:module";
 import path from "node:path";
 import { TextDecoder } from "node:util";
 import { sha256Hex } from "./canonical.ts";
@@ -241,6 +242,15 @@ function resolveRelativeModule(from: string, specifier: string, code: string): s
   return resolved;
 }
 
+function compileRuntimeSource(bytes: Buffer, label: string): Buffer {
+  let compiled: string;
+  try { compiled = stripTypeScriptTypes(utf8(bytes, label), { mode: "strip" }); }
+  catch { return releaseError("RUNTIME_COMPILE_FAILED", "A staged runtime source could not be compiled to deterministic JavaScript."); }
+  // Runtime source imports are already statically constrained above. Rewrite
+  // only their explicit relative TypeScript module suffixes after stripping.
+  return Buffer.from(compiled.replace(/(["'][A-Za-z0-9._/-]+)\.ts(["'])/g, "$1.js$2"), "utf8");
+}
+
 function collectCoreSources(index: SnapshotIndex): string[] {
   const pending = ["src/index.ts"];
   const selected = new Set<string>();
@@ -328,17 +338,17 @@ function assertStagedPolicyExact(plannedPaths: readonly string[], members: reado
 
 function assertStagedImports(packageRoot: string, members: readonly StagedMember[]): void {
   const memberPaths = new Set(members.map((member) => member.path));
-  for (const member of members.filter((candidate) => candidate.path.endsWith(".ts"))) {
+  for (const member of members.filter((candidate) => candidate.path.endsWith(".js"))) {
     const source = utf8(fs.readFileSync(path.join(packageRoot, member.path)), "Staged source");
     for (const specifier of moduleSpecifiers(source)) {
-      if (member.path === "beta/src/kernel-port.ts" && specifier === STAGED_KERNEL_SPECIFIER) continue;
-      const resolved = resolveRelativeModule(member.path, specifier, "STAGED_IMPORT_ESCAPE");
+      if (member.path === "beta/src/kernel-port.js" && specifier === STAGED_KERNEL_SPECIFIER.replace(/\.ts$/, ".js")) continue;
+      const resolved = resolveRelativeModule(member.path, specifier.replace(/\.js$/, ".ts"), "STAGED_IMPORT_ESCAPE").replace(/\.ts$/, ".js");
       const expectedPrefix = member.path.startsWith("beta/src/") ? "beta/src/" : "core/src/";
       if (!resolved.startsWith(expectedPrefix) || !memberPaths.has(resolved)) releaseError("STAGED_IMPORT_ESCAPE", "Staged relative import leaves its runtime boundary.");
     }
   }
   const bin = utf8(fs.readFileSync(path.join(packageRoot, "bin/trajecta-beta")), "Staged bin");
-  if (!/^#![^\r\n]+\nimport "\.\.\/beta\/src\/cli\.ts";\n$/.test(bin)) releaseError("INVALID_STAGED_BIN", "Staged binary must import only beta/src/cli.ts.");
+  if (bin !== "#!/usr/bin/env node\nimport { runCli } from \"../beta/src/cli.js\";\nprocess.exitCode = await runCli(process.argv.slice(2), process.cwd(), { stdout: bytes => { process.stdout.write(bytes); }, stderr: text => { process.stderr.write(text); } });\n") releaseError("INVALID_STAGED_BIN", "Staged binary must explicitly invoke the generated beta CLI entry.");
 }
 
 export function stagePackage(options: StagePackageOptions): StagedPackage {
@@ -354,10 +364,10 @@ export function stagePackage(options: StagePackageOptions): StagedPackage {
   try {
     fs.mkdirSync(packageRoot, { recursive: true, mode: 0o755 });
     writeMember(packageRoot, "package.json", template, "0644", licenseMap, members);
-    writeMember(packageRoot, "bin/trajecta-beta", Buffer.from("#!/usr/bin/env -S node --experimental-strip-types\nimport \"../beta/src/cli.ts\";\n", "utf8"), "0755", licenseMap, members);
+    writeMember(packageRoot, "bin/trajecta-beta", Buffer.from("#!/usr/bin/env node\nimport { runCli } from \"../beta/src/cli.js\";\nprocess.exitCode = await runCli(process.argv.slice(2), process.cwd(), { stdout: bytes => { process.stdout.write(bytes); }, stderr: text => { process.stderr.write(text); } });\n", "utf8"), "0755", licenseMap, members);
     writeMember(packageRoot, "beta/DEVELOPMENT-BOUNDARY.md", readSnapshot(index, "packages/trajecta-beta/DEVELOPMENT-BOUNDARY.md"), "0644", licenseMap, members);
     for (const sourcePath of collectBetaSources(index)) {
-      const destination = `beta/src/${sourcePath.slice(BETA_SOURCE_PREFIX.length)}`;
+      const destination = `beta/src/${sourcePath.slice(BETA_SOURCE_PREFIX.length).replace(/\.ts$/, ".js")}`;
       const original = readSnapshot(index, sourcePath);
       let bytes = original;
       if (sourcePath.endsWith("/kernel-port.ts")) {
@@ -366,9 +376,9 @@ export function stagePackage(options: StagePackageOptions): StagedPackage {
         if (occurrences !== 1) releaseError("KERNEL_PORT_DRIFT", "Kernel port must contain exactly one approved core module specifier.");
         bytes = Buffer.from(source.replace(KERNEL_SPECIFIER, STAGED_KERNEL_SPECIFIER), "utf8");
       }
-      writeMember(packageRoot, destination, bytes, "0644", licenseMap, members);
+      writeMember(packageRoot, destination, compileRuntimeSource(bytes, "Beta source"), "0644", licenseMap, members);
     }
-    for (const sourcePath of collectCoreSources(index)) writeMember(packageRoot, `core/src/${sourcePath.slice(CORE_SOURCE_PREFIX.length)}`, readSnapshot(index, sourcePath), "0644", licenseMap, members);
+    for (const sourcePath of collectCoreSources(index)) writeMember(packageRoot, `core/src/${sourcePath.slice(CORE_SOURCE_PREFIX.length).replace(/\.ts$/, ".js")}`, compileRuntimeSource(readSnapshot(index, sourcePath), "Core source"), "0644", licenseMap, members);
     writeMember(packageRoot, "LICENSE", readSnapshot(index, "LICENSE"), "0644", licenseMap, members);
     writeMember(packageRoot, "NOTICE", readSnapshot(index, "NOTICE"), "0644", licenseMap, members);
     writeMember(packageRoot, "BETA-COMMERCIAL-TERMS.txt", readSnapshot(index, "release/evaluation/LICENSES/BETA-COMMERCIAL-TERMS.txt"), "0644", licenseMap, members);

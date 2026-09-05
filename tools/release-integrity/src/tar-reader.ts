@@ -30,6 +30,7 @@ export interface AuditTgzOptions {
 
 export interface AuditedTgz {
   memberLedger: readonly TarLedgerMember[];
+  members: ReadonlyMap<string, Buffer>;
 }
 
 const DEFAULT_LIMITS: TarAuditLimits = Object.freeze({
@@ -159,6 +160,7 @@ export function auditTgz(tgz: Buffer, options: AuditTgzOptions): AuditedTgz {
   const stream = inflateOneCanonicalGzipMember(tgz, limits);
   if (stream.length < 1024 || stream.length > limits.maxUncompressedBytes || stream.length > tgz.length * limits.maxCompressionRatio) releaseError("TAR_LIMIT_EXCEEDED", "Uncompressed tarball exceeds its bound.");
   const members: TarLedgerMember[] = [];
+  const memberBytes = new Map<string, Buffer>();
   const names = new Set<string>();
   const folded = new Set<string>();
   let cursor = 0;
@@ -174,9 +176,10 @@ export function auditTgz(tgz: Buffer, options: AuditTgzOptions): AuditedTgz {
     }
     if (members.length >= limits.maxMembers) releaseError("TAR_LIMIT_EXCEEDED", "Tar member count exceeds its bound.");
     const parsed = assertCanonicalHeader(header, releaseSeconds);
-    const memberPath = options.packagePrefix === undefined ? parsed.path : (() => {
-      if (!parsed.path.startsWith(options.packagePrefix) || parsed.path.length === options.packagePrefix.length) return releaseError("INVALID_TAR_PACKAGE_PREFIX", "Package tar members must use the canonical package/ prefix.");
-      return parsed.path.slice(options.packagePrefix.length);
+    const packagePrefix = options.packagePrefix ?? "package/";
+    const memberPath = (() => {
+      if (!parsed.path.startsWith(packagePrefix) || parsed.path.length === packagePrefix.length) return releaseError("INVALID_TAR_PACKAGE_PREFIX", "Package tar members must use the canonical package/ prefix.");
+      return parsed.path.slice(packagePrefix.length);
     })();
     if ((memberPath === "bin/trajecta-beta") !== (parsed.mode === "0755")) releaseError("INVALID_TAR_MODE", "Only the package binary may be executable.");
     if (names.has(memberPath)) releaseError("DUPLICATE_TAR_MEMBER", "Tar may not contain duplicate members.");
@@ -193,6 +196,7 @@ export function auditTgz(tgz: Buffer, options: AuditTgzOptions): AuditedTgz {
     // audit because release construction always supplies expectedMembers.
     const classification = options.expectedMembers?.find((member) => member.path === memberPath)?.originalClass ?? "notice";
     members.push(Object.freeze({ path: memberPath, bytes: parsed.bytes, sha256: sha256Hex(stream.subarray(start, end)), mode: parsed.mode, originalClass: classification }));
+    memberBytes.set(memberPath, Buffer.from(stream.subarray(start, end)));
     names.add(memberPath);
     folded.add(memberPath.toLocaleLowerCase("en-US"));
     cursor = end + padding;
@@ -203,5 +207,5 @@ export function auditTgz(tgz: Buffer, options: AuditTgzOptions): AuditedTgz {
     const samePaths = members.length === options.expectedMembers.length && members.every((member, index) => member.path === options.expectedMembers![index].path);
     releaseError(samePaths ? "TAR_LEDGER_MISMATCH" : "TAR_MEMBER_SET_MISMATCH", "Tar members do not match the bound package ledger.");
   }
-  return Object.freeze({ memberLedger: Object.freeze(members) });
+  return Object.freeze({ memberLedger: Object.freeze(members), members: memberBytes });
 }

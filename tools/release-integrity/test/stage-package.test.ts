@@ -69,10 +69,13 @@ test("stages exactly the generated core + beta package and ledger from a snapsho
   const staged = stagePackage({ snapshot, stageDirectory: output });
   const packageRoot = path.join(output, "package");
   assert.deepEqual(stagedFiles(packageRoot), staged.members.map((member) => member.path));
-  assert.match(fs.readFileSync(path.join(packageRoot, "bin/trajecta-beta"), "utf8"), /^#!.*\nimport "\.\.\/beta\/src\/cli\.ts";\n$/);
+  assert.equal(fs.readFileSync(path.join(packageRoot, "bin/trajecta-beta"), "utf8"), "#!/usr/bin/env node\nimport { runCli } from \"../beta/src/cli.js\";\nprocess.exitCode = await runCli(process.argv.slice(2), process.cwd(), { stdout: bytes => { process.stdout.write(bytes); }, stderr: text => { process.stderr.write(text); } });\n");
   const originalKernel = fs.readFileSync(path.join(snapshot.root, "packages/trajecta-beta/src/kernel-port.ts"), "utf8");
-  const stagedKernel = fs.readFileSync(path.join(packageRoot, "beta/src/kernel-port.ts"), "utf8");
-  assert.equal(stagedKernel, originalKernel.replace("../../../src/index.ts", "../../core/src/index.ts"));
+  const stagedKernel = fs.readFileSync(path.join(packageRoot, "beta/src/kernel-port.js"), "utf8");
+  assert.match(originalKernel, /\.\.\/\.\.\/\.\.\/src\/index\.ts/);
+  assert.match(stagedKernel, /from "\.\.\/\.\.\/core\/src\/index\.js"/);
+  assert.doesNotMatch(stagedKernel, /\.ts["']/);
+  assert.ok(staged.members.every(member => !member.path.endsWith(".ts")));
   assert.equal(fs.readFileSync(path.join(packageRoot, "LICENSE"), "utf8"), fs.readFileSync(path.join(snapshot.root, "LICENSE"), "utf8"));
   assert.equal(fs.readFileSync(path.join(packageRoot, "NOTICE"), "utf8"), fs.readFileSync(path.join(snapshot.root, "NOTICE"), "utf8"));
   assert.match(fs.readFileSync(path.join(packageRoot, "BETA-COMMERCIAL-TERMS.txt"), "utf8"), /evaluation only[\s\S]*not for sale[\s\S]*not activate a commercial offer/i);
