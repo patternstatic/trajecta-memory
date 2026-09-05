@@ -20,7 +20,7 @@
 
 <h2>1. Install the local package</h2>
 <p>Open Terminal in a new empty test folder. Replace the archive path below with the full path to the package inside this unpacked bundle. Keep the quotation marks if the path contains spaces.</p>
-<pre><code>npm install --offline --ignore-scripts --package-lock=false --no-audit --no-fund "/absolute/path/to/bundle/packages/trajecta-beta-0.1.0.tgz"
+<pre><code>npm install --prefix . --offline --ignore-scripts --package-lock=false --no-audit --no-fund "/absolute/path/to/bundle/packages/trajecta-beta-0.1.0.tgz"
 ./node_modules/.bin/trajecta-beta version</code></pre>
 <p>Expected: <code>Trajecta Verified Resume SDK Beta 0.1.0</code>. Installation uses the package on disk, has no dependency downloads, and does not change your shell startup files.</p>
 
@@ -35,7 +35,7 @@
 <p>Receipts remain in <code>demo-state</code>. Use a new state-folder name for another trial. This isolated example is not evidence that your own project or an external AI completed work.</p>
 
 <h2>3. Run the installed acceptance check</h2>
-<p>Use the original downloaded ZIP, the separately unpacked bundle, and the SHA-256 pin and public key you obtained independently. Run the installed package from outside a source checkout. Both output paths must be fresh absolute paths whose parent folders already exist.</p>
+<p>Use the original downloaded ZIP, the separately unpacked bundle, and the SHA-256 pin and public key you obtained independently. Run the installed package from outside a source checkout. Both output paths must be fresh absolute paths whose parent folders already exist. Do not create the state or evidence directories themselves; the command refuses pre-existing output directories.</p>
 <pre><code>/absolute/path/to/test/node_modules/.bin/trajecta-beta verify-acceptance \
   --archive /absolute/path/to/original-download.zip \
   --pinned-zip-sha256 &lt;independent64hex&gt; \

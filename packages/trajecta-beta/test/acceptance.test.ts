@@ -95,7 +95,7 @@ function fixture(t: test.TestContext) {
   const outside = path.join(root, "outside-source-checkout"); fs.mkdirSync(outside);
   const independentlyPinnedZipSha256 = hash(fs.readFileSync(archivePath));
   assert.equal(independentlyPinnedZipSha256, bundle.archiveSha256);
-  return { root, outside, bin, input: { archivePath, pinnedZipSha256: independentlyPinnedZipSha256, bundleRoot, publicKeyPath, installedPackageRoot, bin } };
+  return { root, outside, bin, tgz, installEnvironment: { ...installEnvironment, NPM_CONFIG_USERCONFIG: npmUserConfig, NPM_CONFIG_GLOBALCONFIG: npmGlobalConfig }, input: { archivePath, pinnedZipSha256: independentlyPinnedZipSha256, bundleRoot, publicKeyPath, installedPackageRoot, bin } };
 }
 
 function acceptanceArgs(input: ReturnType<typeof fixture>["input"], stateRoot: string, evidenceDir: string): string[] {
@@ -113,6 +113,41 @@ function acceptanceArgs(input: ReturnType<typeof fixture>["input"], stateRoot: s
 function runInstalled(bin: string, cwd: string, args: string[]) {
   return spawnSync(bin, args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 }
+
+function guideInstallCommand(name: "START-HERE.md" | "START-HERE.html"): string {
+  const guide = fs.readFileSync(path.join(repository, "release", "evaluation", "payload", name), "utf8");
+  const command = guide.match(/npm install [^\n<]+/)?.[0];
+  assert.ok(command, `${name}: install command`);
+  return command;
+}
+
+function directoryInventory(root: string): string[] {
+  if (!fs.existsSync(root)) return [];
+  return fs.readdirSync(root, { recursive: true, withFileTypes: true })
+    .map(entry => `${entry.isDirectory() ? "d" : "f"}:${path.relative(root, path.join(entry.parentPath, entry.name))}`)
+    .sort();
+}
+
+test("documented install remains inside an empty child of an existing npm project", (t) => {
+  const f = fixture(t);
+  const ancestor = path.join(f.root, "existing-ancestor"), child = path.join(ancestor, "empty-test-folder");
+  const ancestorManifest = Buffer.from('{"name":"existing-ancestor","private":true}\n');
+  fs.mkdirSync(path.join(ancestor, "node_modules", "existing-package"), { recursive: true });
+  fs.writeFileSync(path.join(ancestor, "package.json"), ancestorManifest);
+  fs.writeFileSync(path.join(ancestor, "node_modules", "existing-package", "package.json"), '{"name":"existing-package"}\n');
+  fs.mkdirSync(child);
+  const beforeInventory = directoryInventory(path.join(ancestor, "node_modules"));
+  const markdownCommand = guideInstallCommand("START-HERE.md");
+  assert.equal(guideInstallCommand("START-HERE.html"), markdownCommand);
+  const command = markdownCommand.replace('"/absolute/path/to/bundle/packages/trajecta-beta-0.1.0.tgz"', JSON.stringify(f.tgz));
+  assert.notEqual(command, markdownCommand);
+  const result = spawnSync("/bin/sh", ["-c", command], { cwd: child, encoding: "utf8", env: f.installEnvironment });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(fs.readFileSync(path.join(ancestor, "package.json")), ancestorManifest);
+  assert.deepEqual(directoryInventory(path.join(ancestor, "node_modules")), beforeInventory);
+  const localBin = path.join(child, "node_modules", ".bin", "trajecta-beta");
+  assert.match(execFileSync(localBin, ["version"], { encoding: "utf8" }), /0\.1\.0/);
+});
 
 test("evaluation guides show the six-flag installed command and the exact stale revision distinction", () => {
   for (const name of ["START-HERE.md", "START-HERE.html"]) {

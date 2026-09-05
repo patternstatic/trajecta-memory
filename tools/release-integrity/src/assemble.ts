@@ -1,6 +1,6 @@
 import { sha256Hex } from './canonical.ts';
 import { PACKAGE_PATH } from './contracts.ts';
-import { createZip } from './deterministic-zip.ts';
+import { createZip, readZip } from './deterministic-zip.ts';
 import { buildManifest } from './manifest.ts';
 import { buildEvaluationReceipt, signReceipt } from './signing.ts';
 import { type TarLedgerMember } from './tar-reader.ts';
@@ -37,6 +37,9 @@ export function assembleBundle(input: AssemblyInput): { zip:Buffer; archiveSha25
 /** No bytes are extracted until the original archive and independent pins pass. */
 export function verifyAndExtractBundle(input: Parameters<typeof verifyBundle>[0] & {outputDirectory:string;sourceRoot:string}): string {
   const files = verifyBundle(input);
+  const authenticatedModes = new Map(readZip(input.zip,input.releaseInstant).map(member=>[
+    member.path.slice(BUNDLE_ROOT.length+1), Number.parseInt(member.mode,8),
+  ]));
   const output = assertNewOutputDirectory(input.outputDirectory,input.sourceRoot);
   const parent = path.dirname(output);
   if (!fs.lstatSync(parent).isDirectory()) releaseError('UNSAFE_OUTPUT','Extraction requires an existing parent directory.');
@@ -44,6 +47,8 @@ export function verifyAndExtractBundle(input: Parameters<typeof verifyBundle>[0]
   const root = path.join(output,BUNDLE_ROOT);
   fs.mkdirSync(root,{mode:0o700});
   for (const [relative,bytes] of files) {
+    const authenticatedMode = authenticatedModes.get(relative);
+    if (authenticatedMode === undefined) fail();
     const destination = path.join(root,relative);
     let directory = root;
     for (const segment of relative.split('/').slice(0,-1)) {
@@ -56,11 +61,15 @@ export function verifyAndExtractBundle(input: Parameters<typeof verifyBundle>[0]
     const fd = fs.openSync(destination,fs.constants.O_WRONLY|fs.constants.O_CREAT|fs.constants.O_EXCL|fs.constants.O_NOFOLLOW,0o600);
     try {
       fs.writeFileSync(fd,bytes);
+      fs.fchmodSync(fd,authenticatedMode);
       fs.fsyncSync(fd);
+      const completed = fs.fstatSync(fd);
+      if (!completed.isFile() || (completed.mode&0o777)!==authenticatedMode) fail();
     } finally { fs.closeSync(fd); }
     const readFd = fs.openSync(destination,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW);
     try {
-      if (!fs.fstatSync(readFd).isFile() || !fs.readFileSync(readFd).equals(bytes)) releaseError('MANIFEST_MISMATCH','Extracted bytes do not match the verified archive.');
+      const completed = fs.fstatSync(readFd);
+      if (!completed.isFile() || (completed.mode&0o777)!==authenticatedMode || !fs.readFileSync(readFd).equals(bytes)) releaseError('MANIFEST_MISMATCH','Extracted bytes or mode do not match the verified archive.');
     } finally { fs.closeSync(readFd); }
   }
   return root;

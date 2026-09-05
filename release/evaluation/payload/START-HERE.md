@@ -11,7 +11,7 @@ Compare the ZIP SHA-256 and seller key fingerprint with the separate values supp
 In Terminal, open the unpacked bundle folder. Copy its absolute path before continuing. Create a new empty test folder and run:
 
 ```sh
-npm install --offline --ignore-scripts --package-lock=false --no-audit --no-fund "/absolute/path/to/bundle/packages/trajecta-beta-0.1.0.tgz"
+npm install --prefix . --offline --ignore-scripts --package-lock=false --no-audit --no-fund "/absolute/path/to/bundle/packages/trajecta-beta-0.1.0.tgz"
 ./node_modules/.bin/trajecta-beta version
 ./node_modules/.bin/trajecta-beta demo --state-root ./demo-state
 ```
@@ -20,7 +20,7 @@ Replace the archive path with your downloaded file. A successful demo prints STA
 
 ## 3. Run the installed acceptance check
 
-Use the original downloaded ZIP, the separately unpacked bundle, and the SHA-256 pin and public key you obtained independently. Run the installed package from outside a source checkout. Both output paths must be fresh absolute paths whose parent folders already exist.
+Use the original downloaded ZIP, the separately unpacked bundle, and the SHA-256 pin and public key you obtained independently. Run the installed package from outside a source checkout. Both output paths must be fresh absolute paths whose parent folders already exist. Do not create the state or evidence directories themselves; the command refuses pre-existing output directories.
 
 ```sh
 /absolute/path/to/test/node_modules/.bin/trajecta-beta verify-acceptance \
