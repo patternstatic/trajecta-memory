@@ -23,11 +23,21 @@ The archive terms explicitly say evaluation-only. Do not attach these bytes to
 a paid checkout, relabel them commercial, or alter the signed archive in place.
 The current goal is not complete merely because this evaluation passes.
 
-Ty decisions needed before a commercial build:
+## Approved price amendment
 
-1. Approve the proposed USD 19 one-time beta offer: local macOS Apple Silicon
-   SDK, Node 22.19–22.x, 30 calendar days of bug-fix builds and one installation
-   support email thread; no hosted service or automatic account adapter.
+Ty approved USD 9 one-time for the first 10 customers in this task after the
+pricing discussion. This supersedes the proposed USD 19 launch price in the
+original spec, without changing supported environments or licensing boundaries.
+USD 12 is a later price experiment, not an approved automatic increase. The
+first-10 limit must be disclosed and counted from actual paid customers, never
+internal tests or zero-value orders. This approval does not activate checkout.
+
+Ty decisions still needed before a commercial build:
+
+1. Confirm final support wording at the approved USD 9 price. The original
+   proposal was 30 calendar days of bug-fix builds and one installation support
+   email thread; no hosted service or automatic account adapter. Price approval
+   alone does not settle the final customer-facing terms.
 2. Supply the exact customer-facing seller/support contact and approve final
    customer license/refund wording. No identity, address, or legal promise may
    be invented from account ownership or persona.
