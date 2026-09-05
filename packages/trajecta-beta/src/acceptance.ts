@@ -129,6 +129,27 @@ function fullInventory(root: string, relative = ""): AcceptanceProofResult["stat
   return result;
 }
 
+interface CleanupInventoryEntry { path: string; type: "directory" | "file" | "symlink"; sha256: string; bytes: number; }
+
+function wholeTreeInventory(root: string, relative = ""): CleanupInventoryEntry[] {
+  const result: CleanupInventoryEntry[] = [];
+  const directory = path.join(root, relative);
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true }).sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0)) {
+    const child = relative ? path.posix.join(relative.split(path.sep).join("/"), entry.name) : entry.name;
+    const absolute = path.join(root, ...child.split("/"));
+    const stat = fs.lstatSync(absolute);
+    if (stat.isDirectory() && !stat.isSymbolicLink()) {
+      result.push({ path: child, type: "directory", sha256: createHash("sha256").update("").digest("hex"), bytes: 0 });
+      result.push(...wholeTreeInventory(root, child));
+    } else if (stat.isFile() && !stat.isSymbolicLink()) {
+      const bytes = fs.readFileSync(absolute); result.push({ path: child, type: "file", sha256: createHash("sha256").update(bytes).digest("hex"), bytes: bytes.length });
+    } else if (stat.isSymbolicLink()) {
+      const bytes = Buffer.from(fs.readlinkSync(absolute)); result.push({ path: child, type: "symlink", sha256: createHash("sha256").update(bytes).digest("hex"), bytes: bytes.length });
+    } else fail("Disposable acceptance state contains an unsupported filesystem entry.");
+  }
+  return result;
+}
+
 function sanitize(value: string, roots: Array<[string, string]>): string {
   let result = value;
   for (const [root, label] of roots.sort((left, right) => right[0].length - left[0].length)) result = result.split(root).join(label);
@@ -137,6 +158,11 @@ function sanitize(value: string, roots: Array<[string, string]>): string {
 
 function commandReport(commands: AcceptanceProofResult["commands"], roots: Array<[string, string]>) {
   return commands.map(command => ({ argv: command.argv.map((value, index) => index === 0 ? "[installed bin]" : sanitize(value, roots)), exitCode: command.exitCode, stdout: sanitize(command.stdout, roots), stderr: sanitize(command.stderr, roots) }));
+}
+
+function absentNoFollow(file: string): boolean {
+  try { fs.lstatSync(file); return false; }
+  catch (error) { return (error as NodeJS.ErrnoException).code === "ENOENT"; }
 }
 
 /** Authenticate the delivery, reinstall it offline, and export repeatable acceptance evidence. */
@@ -161,11 +187,11 @@ export async function runAcceptance(input: AcceptanceInput): Promise<{code: "ACC
   for (const [name, bytes] of Object.entries(repeat.receipts)) writeExclusive(path.join(evidenceDir, "repeat-receipts", `${name}.json`), bytes);
   const roots: Array<[string, string]> = [[stateRoot, "<state-root>"], [evidenceDir, "<evidence-dir>"], [input.bundleRoot, "<bundle-root>"], [input.installedPackageRoot, "<caller-package>"]];
   writeExclusive(path.join(evidenceDir, "commands.json"), `${JSON.stringify({ primary: commandReport(primary.commands, roots), repeat: commandReport(repeat.commands, roots) }, null, 2)}\n`);
-  writeExclusive(path.join(evidenceDir, "repeat-evidence.json"), `${JSON.stringify({ checks: repeat.checks, semanticTrace: repeat.semanticTrace, finalRevision: repeat.finalRevision, stateInventory: repeat.stateInventory }, null, 2)}\n`);
+  const cleanupInventory = wholeTreeInventory(repeatRoot);
+  writeExclusive(path.join(evidenceDir, "repeat-evidence.json"), `${JSON.stringify({ checks: repeat.checks, semanticTrace: repeat.semanticTrace, finalRevision: repeat.finalRevision, stateInventory: repeat.stateInventory, cleanupInventory }, null, 2)}\n`);
 
-  const cleanupInventory = [...repeat.stateInventory];
   fs.rmSync(repeatRoot, { recursive: true, force: false });
-  const cleanupComplete = !fs.existsSync(repeatRoot) && cleanupInventory.every(entry => !fs.existsSync(path.join(repeatRoot, ...entry.path.split("/"))));
+  const cleanupComplete = absentNoFollow(repeatRoot) && cleanupInventory.every(entry => absentNoFollow(path.join(repeatRoot, ...entry.path.split("/"))));
   if (!cleanupComplete) fail("The disposable repeat proof could not be removed exactly.");
   const evidencePath = path.join(evidenceDir, "evidence.json");
   const installReport = { npmVersion: installed.evidence.npmVersion, versionCommand: { argv: installed.evidence.versionArgv.map((_value, index) => index === 0 ? "[node]" : index === 1 ? "[local npm cli]" : installed.evidence.versionArgv[index]!), exitCode: installed.evidence.versionExitCode }, argv: installed.evidence.argv.map((_value, index) => index === 0 ? "[node]" : index === 1 ? "[local npm cli]" : sanitize(installed.evidence.argv[index]!, roots)), exitCode: installed.evidence.exitCode, stdout: sanitize(installed.evidence.stdout, roots), stderr: sanitize(installed.evidence.stderr, roots) };
@@ -176,7 +202,7 @@ export async function runAcceptance(input: AcceptanceInput): Promise<{code: "ACC
     checks: primary.checks, beforeAfterDigests: { ...primary.evidence.beforeAfterDigests, finalInventorySha256: inventoryDigest(stateInventory) },
     targetStatus: primary.evidence.targetStatus, finalRevision: primary.finalRevision,
     semanticTrace: primary.semanticTrace, stateInventory, semanticEquivalent: true,
-    cleanup: { root: "<state-root>/proof-repeat", inventoriedEntries: cleanupInventory.length, complete: cleanupComplete }, manualIntervention: [], commandTrace: "commands.json",
+    cleanup: { root: "<state-root>/proof-repeat", inventory: cleanupInventory, complete: cleanupComplete }, manualIntervention: [], commandTrace: "commands.json",
   };
   writeExclusive(evidencePath, `${JSON.stringify(report, null, 2)}\n`);
   return { code: "ACCEPTANCE_PASSED", evidencePath };

@@ -63,7 +63,15 @@ function assertInstalledBin(value: string): string {
 
 function commandEnvironment(root: string): NodeJS.ProcessEnv {
   const environment = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")));
-  return { ...environment, TMPDIR: path.join(root, "tmp"), TMP: path.join(root, "tmp"), TEMP: path.join(root, "tmp"), GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0" };
+  const home = path.join(root, "home"), xdg = path.join(root, "xdg"), globalConfig = path.join(root, "global.gitconfig");
+  fs.mkdirSync(home, { mode: 0o700 }); fs.mkdirSync(xdg, { mode: 0o700 });
+  fs.writeFileSync(globalConfig, "", { mode: 0o600, flag: "wx" });
+  return { ...environment, HOME: home, XDG_CONFIG_HOME: xdg, TMPDIR: path.join(root, "tmp"), TMP: path.join(root, "tmp"), TEMP: path.join(root, "tmp"), GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: globalConfig, GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0" };
+}
+
+function git(args: string[], cwd: string, environment: NodeJS.ProcessEnv): void {
+  try { execFileSync("git", args, { cwd, env: environment, stdio: "ignore" }); }
+  catch { fail("The isolated acceptance Git workspace could not be prepared."); }
 }
 
 function run(commands: AcceptanceProofResult["commands"], bin: string, args: string[], cwd: string, environment: NodeJS.ProcessEnv) {
@@ -131,10 +139,10 @@ export async function runAcceptanceProof(input: AcceptanceProofInput): Promise<A
   for (const directory of [tmp, workspace, stateRoot]) fs.mkdirSync(directory, { mode: 0o700 });
   const environment = commandEnvironment(root);
   fs.writeFileSync(path.join(workspace, "package.json"), "{\"name\":\"trajecta-acceptance-customer\",\"private\":true}\n", { mode: 0o600 });
-  execFileSync("git", ["init", "-b", "main"], { cwd: workspace, env: environment, stdio: "ignore" });
-  execFileSync("git", ["add", "package.json"], { cwd: workspace, env: environment, stdio: "ignore" });
-  execFileSync("git", ["-c", "user.name=Trajecta Acceptance", "-c", "user.email=acceptance@example.invalid", "commit", "-m", "Initial customer workspace"], { cwd: workspace, env: environment, stdio: "ignore" });
-  execFileSync("git", ["remote", "add", "origin", "https://example.invalid/customer/workspace.git"], { cwd: workspace, env: environment, stdio: "ignore" });
+  git(["init", "-b", "main"], workspace, environment);
+  git(["add", "package.json"], workspace, environment);
+  git(["-c", "user.name=Trajecta Acceptance", "-c", "user.email=acceptance@example.invalid", "commit", "-m", "Initial customer workspace"], workspace, environment);
+  git(["remote", "add", "origin", "https://example.invalid/customer/workspace.git"], workspace, environment);
 
   const commands: AcceptanceProofResult["commands"] = [];
   const doctor = run(commands, bin, ["doctor", "--state-root", stateRoot], workspace, environment);
@@ -194,9 +202,10 @@ export async function runAcceptanceProof(input: AcceptanceProofInput): Promise<A
 
   const conflictFile = path.join(stateRoot, "conflict.json");
   writeEnvelope(conflictFile, changedEnvelope(currentEnvelope, payload => { payload.packet.cue = "Changed content for conflict proof"; }));
-  const receiptCountBeforeConflict = fs.readdirSync(path.join(stateRoot, "receipts")).length;
+  const receiptsBeforeConflict = inventory(path.join(stateRoot, "receipts"));
   const conflict = run(commands, bin, ["resume", conflictFile, "--state-root", stateRoot, "--accept"], workspace, environment);
-  const receiptCountAfterConflict = fs.readdirSync(path.join(stateRoot, "receipts")).length;
+  const receiptsAfterConflict = inventory(path.join(stateRoot, "receipts"));
+  const postConflictLookup = run(commands, bin, ["receipt", currentEnvelope.operationId, "--state-root", stateRoot], workspace, environment);
 
   const consumedFile = path.join(stateRoot, "consumed-target.json");
   writeEnvelope(consumedFile, changedEnvelope(currentEnvelope, payload => { payload.operationId = "operation:acceptance-consumed"; payload.envelopeId = "envelope:acceptance-consumed"; }));
@@ -226,7 +235,8 @@ export async function runAcceptanceProof(input: AcceptanceProofInput): Promise<A
     acceptedOnce: accepted.exitCode === 0 && acceptedReceipt.code === "RESUMED" && acceptedReceipt.observedRevisionBefore === 3 && acceptedReceipt.observedRevisionAfter === 4 && targetAfterAccepted,
     retryExact: retry.exitCode === 0 && retry.stdout === accepted.stdout,
     lookupExact: lookup.exitCode === 0 && lookup.stdout === accepted.stdout,
-    conflictRefused: conflict.exitCode === 2 && conflict.stderr.startsWith("OPERATION_CONFLICT:") && receiptCountAfterConflict === receiptCountBeforeConflict,
+    conflictRefused: conflict.exitCode === 2 && conflict.stderr.startsWith("OPERATION_CONFLICT:"),
+    conflictReceiptPreserved: sameInventory(receiptsBeforeConflict, receiptsAfterConflict) && postConflictLookup.exitCode === 0 && postConflictLookup.stdout === accepted.stdout,
     consumedRefused: consumed.exitCode === 2 && consumed.stderr.startsWith("TARGET_CONSUMED:"),
     expiryClockControlled: expiryRejected && sameInventory(kernelBeforeExpiry, kernelAfterExpiry),
     oneKernelResume: finalRevision === 4 && resumeDeltas.length === 1,
@@ -235,7 +245,7 @@ export async function runAcceptanceProof(input: AcceptanceProofInput): Promise<A
   const semanticTrace = [
     "doctor:OK", "demo:stale-current-retry", "host:example.invalid/customer/workspace:main",
     "stale:inspect-read-only", "stale:REVISION_CONFLICT:3->3", "wrong-capability-private-rejection", "branchless:private-rejection",
-    "current:inspect:3", "current:RESUMED:3->4", "retry:exact-bytes", "lookup:exact-bytes", "conflict:OPERATION_CONFLICT",
+    "current:inspect:3", "current:RESUMED:3->4", "retry:exact-bytes", "lookup:exact-bytes", "conflict:OPERATION_CONFLICT:receipt-preserved",
     "consumed:TARGET_CONSUMED", "expiry:clock-controlled:TARGET_EXPIRED", "kernel:one-resume:revision-4",
   ];
   const evidence: AcceptanceProofDetails = {
@@ -248,5 +258,5 @@ export async function runAcceptanceProof(input: AcceptanceProofInput): Promise<A
     },
     targetStatus: { afterStale: "issued", afterAccepted: "consumed", expiryCheck: "clock-controlled" },
   };
-  return Object.freeze({ checks: Object.freeze(checks), commands, semanticTrace, stateInventory: inventory(stateRoot), receipts: { stale: staleResume.stdout, accepted: accepted.stdout, retry: retry.stdout, lookup: lookup.stdout }, finalRevision, evidence });
+  return Object.freeze({ checks: Object.freeze(checks), commands, semanticTrace, stateInventory: inventory(stateRoot), receipts: { stale: staleResume.stdout, accepted: accepted.stdout, retry: retry.stdout, lookup: postConflictLookup.stdout }, finalRevision, evidence });
 }

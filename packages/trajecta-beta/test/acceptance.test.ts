@@ -84,8 +84,20 @@ function fixture(t: test.TestContext) {
 
 test("production proof runs installed CLI scenarios twice with exact durable receipts", async (t) => {
   const f = fixture(t);
-  const first = await runAcceptanceProof({ root: path.join(f.root, "proof-a"), bin: f.bin });
-  const second = await runAcceptanceProof({ root: path.join(f.root, "proof-b"), bin: f.bin });
+  const poisonedHome = path.join(f.root, "poisoned-home"), hooks = path.join(f.root, "external-hooks"), marker = path.join(f.root, "hook-executed");
+  fs.mkdirSync(poisonedHome); fs.mkdirSync(hooks);
+  fs.writeFileSync(path.join(hooks, "pre-commit"), `#!/bin/sh\necho unsafe > "${marker}"\n`, { mode: 0o755 });
+  fs.writeFileSync(path.join(poisonedHome, ".gitconfig"), `[commit]\n\tgpgsign = true\n[core]\n\thooksPath = ${hooks}\n[init]\n\ttemplateDir = ${hooks}\n`);
+  const originalHome = process.env.HOME;
+  process.env.HOME = poisonedHome;
+  let first: Awaited<ReturnType<typeof runAcceptanceProof>>, second: Awaited<ReturnType<typeof runAcceptanceProof>>;
+  try {
+    first = await runAcceptanceProof({ root: path.join(f.root, "proof-a"), bin: f.bin });
+    second = await runAcceptanceProof({ root: path.join(f.root, "proof-b"), bin: f.bin });
+  } finally {
+    if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome;
+  }
+  assert.equal(fs.existsSync(marker), false);
   assert.equal(first.finalRevision, 4);
   assert.ok(Object.keys(first.checks).length >= 12);
   assert.ok(Object.values(first.checks).every(Boolean), JSON.stringify(first.checks));
@@ -97,6 +109,7 @@ test("production proof runs installed CLI scenarios twice with exact durable rec
     assert.match(pair.before, /^[a-f0-9]{64}$/); assert.equal(pair.before, pair.after);
   }
   assert.deepEqual(first.evidence.targetStatus, { afterStale: "issued", afterAccepted: "consumed", expiryCheck: "clock-controlled" });
+  assert.equal(first.checks.conflictReceiptPreserved, true);
   assert.ok(first.commands.some(command => command.argv[1] === "demo"));
   assert.ok(first.commands.some(command => command.argv[1] === "host"));
   assert.ok(first.commands.some(command => command.argv[1] === "inspect"));
@@ -119,6 +132,9 @@ test("acceptance audits, reinstalls offline, exports redacted evidence, and fail
   assert.match(evidence.install.npmVersion, /^\d+\.\d+\.\d+$/);
   assert.equal(evidence.manualIntervention.length, 0);
   assert.equal(evidence.cleanup.complete, true);
+  assert.ok(evidence.cleanup.inventory.some((entry: {path: string; type: string}) => entry.path === "workspace/.git" && entry.type === "directory"));
+  assert.ok(evidence.cleanup.inventory.some((entry: {path: string; type: string}) => entry.path === "tmp" && entry.type === "directory"));
+  assert.ok(evidence.cleanup.inventory.some((entry: {path: string; type: string}) => entry.path === "demo-state" && entry.type === "directory"));
   assert.ok(evidence.stateInventory.some((entry: {path: string}) => entry.path.startsWith("offline-install/")));
   for (const pair of Object.values(evidence.beforeAfterDigests).filter((value): value is {before: string; after: string} => typeof value === "object" && value !== null && "before" in value)) {
     assert.match(pair.before, /^[a-f0-9]{64}$/); assert.equal(pair.before, pair.after);
