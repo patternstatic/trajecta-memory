@@ -112,6 +112,7 @@ test("authenticates the delivered ZIP, unpacked tree, and installed package with
       publicKeyFingerprint: fixture.publicKeyFingerprint,
       memberCount: 17,
       installedMemberCount: 8,
+      releaseReceiptSchema: "trajecta.release-integrity-evaluation/v1",
       releaseInstant: RELEASE_INSTANT,
     });
     assert.deepEqual(treeState(fixture.root), before);

@@ -19,6 +19,17 @@ test("build CLI accepts one complete explicit frozen input set", () => {
   });
 });
 
+test("commercial candidate build is an explicit closed CLI command", () => {
+  const parsed = parseReleaseCli(["build-commercial-candidate", ...required]);
+  assert.deepEqual(parsed, {
+    command: "build-commercial-candidate", privateKey: "/outside/private.pem", publicKey: "/outside/public.pem", gitBin: "/usr/bin/git", npmCli: "/outside/npm-cli.js", buildCommit: "a".repeat(40), releaseInstant: "2026-09-05T00:00:00Z", verificationInstant: "2026-09-05T00:00:00Z", outputDir: "/outside/out",
+  });
+  assert.deepEqual(buildOptionsFromCli(parsed, "/source"), {
+    sourceRoot: "/source", releaseKind: "commercial-candidate", privateKey: "/outside/private.pem", publicKey: "/outside/public.pem", gitBin: "/usr/bin/git", npmCli: "/outside/npm-cli.js", buildCommit: "a".repeat(40), releaseInstant: "2026-09-05T00:00:00Z", verificationInstant: "2026-09-05T00:00:00Z", outputDir: "/outside/out",
+  });
+  assert.throws(() => parseReleaseCli(["build-commercial", ...required]));
+});
+
 test("CLI rejects unknown, duplicate, empty, and missing frozen flags", () => {
   // Would fail if an ambiguous command selected an unreviewed default or silently ignored operator input.
   for (const argv of [["build", ...required, "--unknown", "x"], ["build", ...required, "--git-bin", "/again"], ["build", ...required.slice(0, -2)], ["build", ...required.map(value => value === "/outside/out" ? "" : value)]]) assert.throws(() => parseReleaseCli(argv));

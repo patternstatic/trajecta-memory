@@ -12,6 +12,7 @@ import {
   parseReleaseInstant,
   parseVerificationInstant,
   parseReleasePins,
+  resolveReleaseKind,
   parseSha256,
 } from "../src/contracts.ts";
 import { canonicalJsonLf, sha256Hex } from "../src/canonical.ts";
@@ -47,6 +48,13 @@ const receipt = {
   keyId: "ed25519:fixture",
   publicKeyFingerprint: "c".repeat(64),
 };
+
+test("release kind defaults only to evaluation and rejects unknown profiles", () => {
+  assert.equal(resolveReleaseKind(undefined), "evaluation");
+  assert.equal(resolveReleaseKind("evaluation"), "evaluation");
+  assert.equal(resolveReleaseKind("commercial-candidate"), "commercial-candidate");
+  assert.throws(() => resolveReleaseKind("commercial" as never), { code: "INVALID_RELEASE_KIND" });
+});
 
 test("canonical bytes are sorted UTF-8 JSON with one LF and stable SHA-256", () => {
   // Would fail if a later receipt or manifest depends on object insertion order or platform line endings.
@@ -159,7 +167,7 @@ test("payload policy names the frozen construction inputs, staged paths, and exc
   // Would fail if a release input could bypass the commit-tree allowlist or a seller-only file entered staging.
   const policy = JSON.parse(fs.readFileSync(new URL("../../../release/payload-policy.json", import.meta.url), "utf8"));
   assert.equal(policy.schema, "trajecta.release-payload-policy/v1");
-  for (const input of ["tools/release-integrity/src/**/*.ts", "release/trajecta-beta.package.json", "release/evaluation/**/*", "src/**/*.ts", "packages/trajecta-beta/src/**/*.ts", "packages/trajecta-beta/bin/trajecta-beta", "packages/trajecta-beta/DEVELOPMENT-BOUNDARY.md", "LICENSE", "NOTICE", "release/payload-policy.json", "release/license-map.json"]) assert.ok(policy.sourceRoots.includes(input), input);
+  for (const input of ["tools/release-integrity/src/**/*.ts", "release/trajecta-beta.package.json", "release/evaluation/**/*", "release/commercial-candidate/**/*", "src/**/*.ts", "packages/trajecta-beta/src/**/*.ts", "packages/trajecta-beta/bin/trajecta-beta", "packages/trajecta-beta/DEVELOPMENT-BOUNDARY.md", "LICENSE", "NOTICE", "release/payload-policy.json", "release/license-map.json"]) assert.ok(policy.sourceRoots.includes(input), input);
   for (const staged of ["package/package.json", "package/bin/trajecta-beta", "package/beta/DEVELOPMENT-BOUNDARY.md", "package/LICENSES/CORE-MODIFICATIONS.txt"]) assert.ok(policy.stagedPaths.includes(staged), staged);
   for (const excluded of ["tools/release-integrity/test/**", "packages/trajecta-beta/test/**", ".git/**"]) assert.ok(policy.exclusionList.includes(excluded), excluded);
 });

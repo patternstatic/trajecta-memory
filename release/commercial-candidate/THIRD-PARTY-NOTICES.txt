@@ -1,0 +1,9 @@
+Third-party notices
+
+The staged core runtime includes Trajecta Memory components under the Apache
+License, Version 2.0. Their license and applicable NOTICE are included with the
+package. The staged package declares no dependency, optional dependency, peer
+dependency, bundled dependency, or lifecycle script.
+
+This notice records component provenance for the commercial candidate. It does
+not activate an offer, prove payment, or claim completion by a remote agent.

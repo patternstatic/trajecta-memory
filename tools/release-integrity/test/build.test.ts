@@ -3,7 +3,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { assertBuildRuntime, buildRelease } from "../src/build.ts";
+import { assertBuildRuntime, buildRelease, releaseDocumentSource } from "../src/build.ts";
+
+test("commercial candidate selects its own buyer-facing notices", () => {
+  assert.equal(releaseDocumentSource("commercial-candidate", "START-HERE.md"), "release/commercial-candidate/payload/START-HERE.md");
+  assert.equal(releaseDocumentSource("commercial-candidate", "THIRD-PARTY-NOTICES.txt"), "release/commercial-candidate/THIRD-PARTY-NOTICES.txt");
+  assert.equal(releaseDocumentSource("evaluation", "THIRD-PARTY-NOTICES.txt"), "release/evaluation/THIRD-PARTY-NOTICES.txt");
+});
 
 test("release builder pins its own TypeScript-stripping Node runtime", () => {
   // Would fail if deterministic build bytes silently depended on a different Node implementation.

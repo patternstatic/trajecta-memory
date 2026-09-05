@@ -9,15 +9,16 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { verifyDeliveredBundle } from '../../../packages/trajecta-beta/src/release/archive-verification.ts';
+import { readZip } from '../src/deterministic-zip.ts';
 
 test('signed bundle rebuilds identically and verifies independently pinned bytes',()=>{
   const keys=generateKeyPairSync('ed25519'), publicKeyPem=keys.publicKey.export({format:'pem',type:'spki'}).toString(),privateKeyPem=keys.privateKey.export({format:'pem',type:'pkcs8'}).toString();
   const releaseInstant='2026-09-05T00:00:00Z';
-  const entries=[{path:'LICENSE',bytes:Buffer.from('Core license\n'),mode:'0644' as const},{path:'LICENSES/CORE-MODIFICATIONS.txt',bytes:Buffer.from('Evaluation notice\n'),mode:'0644' as const},{path:'NOTICE',bytes:Buffer.from('Core attribution\n'),mode:'0644' as const},{path:'beta/DEVELOPMENT-BOUNDARY.md',bytes:Buffer.from('Evaluation'),mode:'0644' as const},{path:'package.json',bytes:Buffer.from('{}'),mode:'0644' as const}];
+  const entries=[{path:'BETA-COMMERCIAL-TERMS.txt',bytes:Buffer.from('Customer-0 evaluation only'),mode:'0644' as const},{path:'LICENSE',bytes:Buffer.from('Core license\n'),mode:'0644' as const},{path:'LICENSES/CORE-MODIFICATIONS.txt',bytes:Buffer.from('Evaluation notice\n'),mode:'0644' as const},{path:'NOTICE',bytes:Buffer.from('Core attribution\n'),mode:'0644' as const},{path:'beta/DEVELOPMENT-BOUNDARY.md',bytes:Buffer.from('Evaluation'),mode:'0644' as const},{path:'package.json',bytes:Buffer.from('{}'),mode:'0644' as const}];
   const tgz=createDeterministicTgz(entries.map(e=>({...e,path:`package/${e.path}`})),releaseInstant);
   const memberLedger=entries.map(e=>({path:e.path,bytes:e.bytes.length,sha256:sha256Hex(e.bytes),mode:e.mode,originalClass:'notice' as const}));
   const documents=new Map(DOCUMENT_PATHS.map(p=>[p,Buffer.from('Customer-0 evaluation only')]));
-  documents.set('LICENSES/CORE-APACHE-2.0.txt',entries[0].bytes);
+  documents.set('LICENSES/CORE-APACHE-2.0.txt',entries.find(entry=>entry.path==='LICENSE')!.bytes);
   documents.set('LICENSES/CORE-NOTICE.txt',Buffer.from('Core attribution\n\nEvaluation notice\n'));
   const input={tgz,memberLedger,documents,buildCommit:'a'.repeat(40),releaseInstant,verificationInstant:releaseInstant,publicKeyPem,privateKeyPem};
   const first=assembleBundle(input),second=assembleBundle(input);
@@ -42,6 +43,9 @@ test('signed bundle rebuilds identically and verifies independently pinned bytes
   fs.symlinkSync(destinationParent,linked);
   assert.throws(()=>assembly.verifyAndExtractBundle({...pinned,outputDirectory:path.join(linked,'escape'),sourceRoot:process.cwd()}));
   assert.equal(fs.existsSync(path.join(destinationParent,'escape')),false);
+  const candidate=assembleBundle({...input,releaseKind:'commercial-candidate'});
+  const candidateReceipt=JSON.parse(readZip(candidate.zip,releaseInstant).find(member=>member.path.endsWith('/RELEASE-RECEIPT.json'))!.bytes.toString('utf8'));
+  assert.equal(candidateReceipt.schema,'trajecta.release-integrity-commercial-candidate/v1');
 });
 
 test('seller extraction restores authenticated modes under a restrictive umask for customer verification', (t) => {
@@ -78,5 +82,6 @@ test('seller extraction restores authenticated modes under a restrictive umask f
     memberCount:17,
     installedMemberCount:entries.length,
     releaseInstant,
+    releaseReceiptSchema:'trajecta.release-integrity-evaluation/v1',
   });
 });

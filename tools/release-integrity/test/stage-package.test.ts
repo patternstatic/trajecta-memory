@@ -30,7 +30,7 @@ function recursiveTypescriptFiles(root: string, relative: string): string[] {
 
 function snapshotFrom(root = repository): SourceSnapshot {
   const files = [
-    "release/payload-policy.json", "release/trajecta-beta.package.json", "release/license-map.json", "release/evaluation/LICENSES/BETA-COMMERCIAL-TERMS.txt", "LICENSE", "NOTICE",
+    "release/payload-policy.json", "release/trajecta-beta.package.json", "release/license-map.json", "release/evaluation/LICENSES/BETA-COMMERCIAL-TERMS.txt", "release/commercial-candidate/LICENSES/BETA-COMMERCIAL-TERMS.txt", "release/commercial-candidate/DEVELOPMENT-BOUNDARY.md", "LICENSE", "NOTICE",
     "packages/trajecta-beta/DEVELOPMENT-BOUNDARY.md", "packages/trajecta-beta/bin/trajecta-beta",
     ...recursiveTypescriptFiles(root, "packages/trajecta-beta/src"),
     "src/index.ts", "src/relay.ts", "src/store.ts", "src/types.ts",
@@ -101,6 +101,21 @@ test("stages exactly the generated core + beta package and ledger from a snapsho
   assert.ok(outerNotice.subarray(0, fs.readFileSync(path.join(repository, "NOTICE")).length).equals(fs.readFileSync(path.join(repository, "NOTICE"))));
   assert.ok(outerNotice.subarray(outerNotice.length - renderCoreModifications(map.members).length).equals(renderCoreModifications(map.members)));
   assert.doesNotMatch(outerNotice.toString("utf8"), /doctor/i);
+});
+
+test("commercial candidate stages the approved terms inside the installable package", () => {
+  const snapshot = snapshotFrom();
+  const output = stageDirectory("commercial-stage");
+  try {
+    const staged = stagePackage({ snapshot, stageDirectory: output, releaseKind: "commercial-candidate" });
+    const terms = fs.readFileSync(path.join(staged.packageRoot, "BETA-COMMERCIAL-TERMS.txt"), "utf8");
+    assert.match(terms, /USD 9 one-time for the first ten paying customers/);
+    assert.match(terms, /lam\.thisside@gmail\.com/);
+    assert.doesNotMatch(terms, /evaluation only|not for sale/i);
+    const boundary = fs.readFileSync(path.join(staged.packageRoot, "beta/DEVELOPMENT-BOUNDARY.md"), "utf8");
+    assert.match(boundary, /installable customer package/i);
+    assert.doesNotMatch(boundary, /not an installable customer package|must not be sold/i);
+  } finally { fs.rmSync(snapshot.root, { recursive: true, force: true }); fs.rmSync(output, { recursive: true, force: true }); }
 });
 
 test("fails closed on source drift, symlinks, and unclassified package members", () => {

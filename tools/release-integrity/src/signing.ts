@@ -1,10 +1,10 @@
 import { createPrivateKey, createPublicKey, sign, type KeyObject } from "node:crypto";
 import { canonicalJsonLf, sha256Hex } from "./canonical.ts";
-import { parseEvaluationReceipt } from "./contracts.ts";
+import { COMMERCIAL_CANDIDATE_LIMITATIONS, parseCommercialCandidateReceipt, parseEvaluationReceipt, parseReleaseReceipt } from "./contracts.ts";
 import { releaseError } from "./errors.ts";
-import { publicKeyFingerprint, type EvaluationReceipt } from "../../../packages/trajecta-beta/src/release/signature-verification.ts";
+import { publicKeyFingerprint, type CommercialCandidateReceipt, type EvaluationReceipt, type ReleaseReceipt } from "../../../packages/trajecta-beta/src/release/signature-verification.ts";
 export { publicKeyFingerprint, verifySignedReceipt } from "../../../packages/trajecta-beta/src/release/signature-verification.ts";
-export type { EvaluationReceipt } from "../../../packages/trajecta-beta/src/release/signature-verification.ts";
+export type { CommercialCandidateReceipt, EvaluationReceipt, ReleaseReceipt } from "../../../packages/trajecta-beta/src/release/signature-verification.ts";
 
 const MAX_RECEIPT_BYTES = 64 * 1024;
 const MAX_PEM_BYTES = 16 * 1024;
@@ -17,7 +17,7 @@ const LIMITATIONS = Object.freeze(["Customer-0-not-run", "not-for-sale", "no-com
 const SUPPORT_DEFINITION = "30 calendar days of bug-fix builds from purchase and one email thread for installation clarification";
 
 export interface BuiltReceipt {
-  value: EvaluationReceipt;
+  value: ReleaseReceipt;
   bytes: Buffer;
   manifestSha256: string;
   publicKeyFingerprint: string;
@@ -49,10 +49,18 @@ export function buildEvaluationReceipt(input: { buildCommit: string; manifestByt
   return Object.freeze({ value, bytes, manifestSha256: value.manifestSha256, publicKeyFingerprint: fingerprint, keyId });
 }
 
+/** Constructs preparation claims only; commercial terms remain bound by the manifest. */
+export function buildCommercialCandidateReceipt(input: Parameters<typeof buildEvaluationReceipt>[0]): BuiltReceipt {
+  const evaluation = buildEvaluationReceipt(input);
+  const value: CommercialCandidateReceipt = Object.freeze({ ...evaluation.value, schema: "trajecta.release-integrity-commercial-candidate/v1", limitations: COMMERCIAL_CANDIDATE_LIMITATIONS });
+  parseCommercialCandidateReceipt(value);
+  return Object.freeze({ ...evaluation, value, bytes: canonicalJsonLf(value) });
+}
+
 export function signReceipt(input: { receiptBytes: Buffer; privateKeyPem: string }): Buffer {
   if (!input || Object.keys(input).length !== 2 || !Buffer.isBuffer(input.receiptBytes) || input.receiptBytes.length === 0 || input.receiptBytes.length > MAX_RECEIPT_BYTES) return releaseError("INVALID_RECEIPT", "Receipt bytes are invalid.");
   const value = parseCanonicalReceipt(input.receiptBytes);
-  parseEvaluationReceipt(value);
+  parseReleaseReceipt(value);
   const key = privateEd25519(input.privateKeyPem);
   const fingerprint = publicKeyFingerprint(createPublicKey(key).export({ type: "spki", format: "pem" }).toString());
   if (value.publicKeyFingerprint !== fingerprint || value.keyId !== `ed25519:${fingerprint.slice(0, 16)}`) return releaseError("KEY_FINGERPRINT_MISMATCH", "Signing key does not match the receipt seller key.");

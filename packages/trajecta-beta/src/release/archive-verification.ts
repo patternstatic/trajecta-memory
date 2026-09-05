@@ -5,7 +5,7 @@ import { canonicalJsonLf, sha256Hex } from "./canonical.ts";
 import { PACKAGE_PATH, parseManifest, parseSha256 } from "./contracts.ts";
 import { MAX_CANONICAL_ZIP_BYTES, readZip, readZipReleaseInstant, type ZipMember } from "./deterministic-zip.ts";
 import { ReleaseIntegrityError, releaseError } from "./errors.ts";
-import { MAX_PUBLIC_KEY_BYTES, publicKeyFingerprint, verifySignedReceipt, type EvaluationReceipt } from "./signature-verification.ts";
+import { MAX_PUBLIC_KEY_BYTES, publicKeyFingerprint, verifySignedReceipt, type ReleaseReceipt } from "./signature-verification.ts";
 import { auditTgz, type TarLedgerMember } from "./tar-reader.ts";
 
 export const BUNDLE_ROOT = "trajecta-verified-resume-sdk-beta-0.1.0";
@@ -26,6 +26,7 @@ export interface DeliveredBundleAudit {
   memberCount: number;
   installedMemberCount: number;
   releaseInstant: string;
+  releaseReceiptSchema: ReleaseReceipt["schema"];
 }
 
 export interface VerifyBundleInput {
@@ -46,7 +47,7 @@ interface ManifestMember {
 interface VerifiedArchive {
   files: ReadonlyMap<string, Buffer>;
   modes: ReadonlyMap<string, "0644" | "0755">;
-  receipt: EvaluationReceipt;
+  receipt: ReleaseReceipt;
   installedMembers: ReadonlyMap<string, Buffer>;
   installedLedger: readonly TarLedgerMember[];
 }
@@ -109,6 +110,12 @@ function verifyArchive(input: VerifyBundleInput): VerifiedArchive {
         || !files.get("LICENSES/CORE-APACHE-2.0.txt")!.equals(coreLicense)
         || !files.get("LICENSES/CORE-NOTICE.txt")!.equals(Buffer.concat([coreNotice, Buffer.from("\n"), modifications]))) {
         releaseError("NOTICE_MISMATCH", "Outer license and notice must preserve the packaged core license and modification notice.");
+      }
+      if (receipt.schema === "trajecta.release-integrity-commercial-candidate/v1") {
+        const innerTerms = audited.members.get("BETA-COMMERCIAL-TERMS.txt");
+        if (!innerTerms || !files.get("LICENSES/BETA-COMMERCIAL-TERMS.txt")!.equals(innerTerms)) {
+          releaseError("TERMS_MISMATCH", "Outer and installed commercial candidate terms must be identical authenticated bytes.");
+        }
       }
       for (const inner of audited.memberLedger) {
         if (inner.originalClass === "apache-core" && inner.path.startsWith("core/src/") && !modifications.toString("utf8").includes(`- ${inner.path}\n`)) {
@@ -232,5 +239,6 @@ export function verifyDeliveredBundle(input: DeliveredBundleInput): DeliveredBun
     memberCount: verified.files.size,
     installedMemberCount: verified.installedLedger.length,
     releaseInstant: verified.receipt.releaseInstant,
+    releaseReceiptSchema: verified.receipt.schema,
   });
 }

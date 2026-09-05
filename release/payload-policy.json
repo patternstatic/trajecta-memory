@@ -5,6 +5,7 @@
     "tools/release-integrity/bin/trajecta-release",
     "release/trajecta-beta.package.json",
     "release/evaluation/**/*",
+    "release/commercial-candidate/**/*",
     "src/**/*.ts",
     "packages/trajecta-beta/src/**/*.ts",
     "packages/trajecta-beta/bin/trajecta-beta",

@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<title>Start here · Trajecta</title>
+<style>
+  :root{color-scheme:light dark;font:18px/1.65 system-ui,sans-serif;background:#171b1b;color:#e9e7df}body{max-width:760px;margin:0 auto;padding:48px 24px 80px}h1{font-size:2.5rem;line-height:1.1;letter-spacing:-.04em}h2{font-size:1.3rem;margin-top:2.2rem}a{color:#a9dec7}pre{padding:18px;background:#242c2b;border:1px solid #45534f;border-radius:8px;overflow:auto;font-size:.8rem}code{font-family:ui-monospace,monospace}.muted{color:#bbc5bf}.tag{display:inline-block;padding:3px 10px;border:1px solid #677f72;border-radius:20px;font-size:.8rem}.callout{border-left:3px solid #a9dec7;padding-left:18px}li{margin:.5rem 0}
+</style>
+<body>
+<span class="tag">Commercial candidate · v0.1.0 · Activation pending</span>
+<h1>Continue the right work.<br>Only once.</h1>
+<p>Trajecta checks whether a local handoff still matches its work, branch and target. Stale work stops. Current work resumes once. An equivalent retry returns the same receipt.</p>
+<p class="callout">This is a local SDK, not an automatic ChatGPT-to-Codex connector. Nothing here posts, contacts an AI service or executes instructions inside a handoff.</p>
+
+<h2>Before you start</h2>
+<p>You need an Apple Silicon Mac, Node 22.19–22.x, npm, Git and a new disposable test folder.</p>
+<p>Compare the ZIP SHA-256 with <code>shasum -a 256 "/path/to/download.zip"</code>. Obtain both the digest and seller public key separately from the ZIP.</p>
+<p>The key fingerprint is SHA-256 of SPKI DER, not the PEM file hash. The exact copyable Node command is in <a href="START-HERE.md">the plain-text guide</a>. Stop if either value differs.</p>
+
+<h2>Install and run the proof</h2>
+<pre><code>npm install --prefix . --offline --ignore-scripts --package-lock=false --no-audit --no-fund "/absolute/path/to/bundle/packages/trajecta-beta-0.1.0.tgz"
+./node_modules/.bin/trajecta-beta version
+./node_modules/.bin/trajecta-beta demo --state-root ./demo-state</code></pre>
+<p>Expect STALE (3 → 3), CURRENT (3 → 4), then RETRY with identical receipt bytes and revision 4.</p>
+
+<h2>Verify the installed delivery</h2>
+<p>Use canonical absolute paths with no symbolic-link components. On macOS use <code>/private/tmp</code>, not <code>/tmp</code>. The parent folders must exist; the new state and evidence directories must not.</p>
+<pre><code>/absolute/path/to/test/node_modules/.bin/trajecta-beta verify-acceptance \
+  --archive /absolute/path/to/original-download.zip \
+  --pinned-zip-sha256 &lt;independent64hex&gt; \
+  --bundle-root /absolute/path/to/unpacked/trajecta-verified-resume-sdk-beta-0.1.0 \
+  --public-key /absolute/path/to/independent-public.pem \
+  --state-root /absolute/path/to/new-acceptance-state \
+  --evidence-dir /absolute/path/to/new-acceptance-evidence</code></pre>
+<p>Success prints <code>ACCEPTANCE_PASSED</code>. It proves local behavior and archive integrity, not payment, human usability or remote task completion.</p>
+
+<h2>Try your disposable workspace</h2>
+<pre><code>/absolute/path/to/test/node_modules/.bin/trajecta-beta doctor
+/absolute/path/to/test/node_modules/.bin/trajecta-beta host init --out target.json</code></pre>
+<p>Keep the 30-minute, single-use target card private. Continue with the three recipes included in this folder.</p>
+
+<h2>Help and terms</h2>
+<p>Contact <strong>lam.thisside@gmail.com</strong> with a redacted error code and failed step. Never send secrets, target cards, transcripts or an entire repository.</p>
+<p><a href="LICENSES/BETA-COMMERCIAL-TERMS.txt">Commercial preparation terms</a> · <a href="THIRD-PARTY-NOTICES.txt">Component notices</a> · <a href="SUPPORTED-ENVIRONMENT.md">Supported environment</a></p>
+<p class="muted">Signature and acceptance do not activate checkout. The human seller must be identified before paid distribution.</p>
+</body>
+</html>
