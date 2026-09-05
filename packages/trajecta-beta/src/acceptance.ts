@@ -177,6 +177,7 @@ export async function runAcceptance(input: AcceptanceInput): Promise<{code: "ACC
   fs.mkdirSync(stateRoot, { mode: 0o700 });
   const installed = installOffline(input, stateRoot);
   const installedAudit = verifyDeliveredBundle(deliveryInput(input, installed.installedPackageRoot));
+  if (callerAudit.releaseReceiptSchema !== installedAudit.releaseReceiptSchema) fail("Caller and installed release receipt identities differ.");
   const primaryRoot = path.join(stateRoot, "proof-primary"), repeatRoot = path.join(stateRoot, "proof-repeat");
   const primary = await runAcceptanceProof({ root: primaryRoot, bin: installed.bin });
   const repeat = await runAcceptanceProof({ root: repeatRoot, bin: installed.bin });
@@ -196,8 +197,11 @@ export async function runAcceptance(input: AcceptanceInput): Promise<{code: "ACC
   const evidencePath = path.join(evidenceDir, "evidence.json");
   const installReport = { npmVersion: installed.evidence.npmVersion, versionCommand: { argv: installed.evidence.versionArgv.map((_value, index) => index === 0 ? "[node]" : index === 1 ? "[local npm cli]" : installed.evidence.versionArgv[index]!), exitCode: installed.evidence.versionExitCode }, argv: installed.evidence.argv.map((_value, index) => index === 0 ? "[node]" : index === 1 ? "[local npm cli]" : sanitize(installed.evidence.argv[index]!, roots)), exitCode: installed.evidence.exitCode, stdout: sanitize(installed.evidence.stdout, roots), stderr: sanitize(installed.evidence.stderr, roots) };
   const stateInventory = fullInventory(stateRoot);
+  const releaseReceiptSchema = callerAudit.releaseReceiptSchema;
   const report = {
-    schema: "trajecta.customer-acceptance-evidence/v1", code: "ACCEPTANCE_PASSED", evaluation: "not-for-sale",
+    schema: "trajecta.customer-acceptance-evidence/v1", code: "ACCEPTANCE_PASSED",
+    evaluation: releaseReceiptSchema === "trajecta.release-integrity-evaluation/v1" ? "not-for-sale" : "commercial-candidate-activation-pending",
+    releaseReceiptSchema,
     archiveAudit: callerAudit, installedArchiveAudit: installedAudit, runtime: { nodeVersion: process.version, platform: process.platform, arch: process.arch }, install: installReport,
     checks: primary.checks, beforeAfterDigests: { ...primary.evidence.beforeAfterDigests, finalInventorySha256: inventoryDigest(stateInventory) },
     targetStatus: primary.evidence.targetStatus, finalRevision: primary.finalRevision,

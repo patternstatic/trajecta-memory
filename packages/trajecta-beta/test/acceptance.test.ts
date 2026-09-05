@@ -29,7 +29,7 @@ function sourceSnapshot(): SourceSnapshot {
     .map((member: string) => `src/${member.slice("package/core/src/".length, -3)}.ts`);
   const files = [...new Set([
     "release/payload-policy.json", "release/trajecta-beta.package.json", "release/license-map.json",
-    "release/evaluation/LICENSES/BETA-COMMERCIAL-TERMS.txt", "LICENSE", "NOTICE",
+    "release/evaluation/LICENSES/BETA-COMMERCIAL-TERMS.txt", "release/commercial-candidate/LICENSES/BETA-COMMERCIAL-TERMS.txt", "LICENSE", "NOTICE",
     "packages/trajecta-beta/DEVELOPMENT-BOUNDARY.md", "packages/trajecta-beta/bin/trajecta-beta",
     "packages/trajecta-beta/src/acceptance.ts", "packages/trajecta-beta/src/acceptance-proof.ts",
     ...stagedBeta, ...stagedCore,
@@ -51,26 +51,29 @@ function writeRegular(file: string, bytes: Buffer, mode: number): void {
   fs.chmodSync(file, mode);
 }
 
-function fixture(t: test.TestContext) {
+function fixture(t: test.TestContext, releaseKind: "evaluation" | "commercial-candidate" = "evaluation") {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "trajecta-acceptance-test-")));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const snapshot = sourceSnapshot();
   t.after(() => fs.rmSync(snapshot.root, { recursive: true, force: true }));
-  const staged = stagePackage({ snapshot, stageDirectory: path.join(root, "stage") });
+  const staged = stagePackage({ snapshot, stageDirectory: path.join(root, "stage"), releaseKind });
   const packed = packPackage({ packageRoot: staged.packageRoot, members: staged.members, releaseInstant });
   const keys = generateKeyPairSync("ed25519");
   const publicKeyPem = keys.publicKey.export({ format: "pem", type: "spki" }).toString();
   const privateKeyPem = keys.privateKey.export({ format: "pem", type: "pkcs8" }).toString();
   const documents = new Map<string, Buffer>();
   for (const member of DOCUMENT_PATHS) {
-    if (!member.startsWith("LICENSES/") && member !== "THIRD-PARTY-NOTICES.txt") documents.set(member, fs.readFileSync(path.join(repository, "release/evaluation/payload", member)));
+    if (!member.startsWith("LICENSES/") && member !== "THIRD-PARTY-NOTICES.txt") {
+      const commercialOverride = releaseKind === "commercial-candidate" && ["START-HERE.html", "START-HERE.md", "SUPPORTED-ENVIRONMENT.md"].includes(member);
+      documents.set(member, fs.readFileSync(path.join(repository, commercialOverride ? "release/commercial-candidate/payload" : "release/evaluation/payload", member)));
+    }
   }
   const modificationNotice = fs.readFileSync(path.join(staged.packageRoot, "LICENSES/CORE-MODIFICATIONS.txt"));
   documents.set("LICENSES/CORE-APACHE-2.0.txt", fs.readFileSync(path.join(repository, "LICENSE")));
   documents.set("LICENSES/CORE-NOTICE.txt", Buffer.concat([fs.readFileSync(path.join(repository, "NOTICE")), Buffer.from("\n"), modificationNotice]));
-  documents.set("LICENSES/BETA-COMMERCIAL-TERMS.txt", fs.readFileSync(path.join(repository, "release/evaluation/LICENSES/BETA-COMMERCIAL-TERMS.txt")));
+  documents.set("LICENSES/BETA-COMMERCIAL-TERMS.txt", fs.readFileSync(path.join(repository, releaseKind === "commercial-candidate" ? "release/commercial-candidate/LICENSES/BETA-COMMERCIAL-TERMS.txt" : "release/evaluation/LICENSES/BETA-COMMERCIAL-TERMS.txt")));
   documents.set("THIRD-PARTY-NOTICES.txt", fs.readFileSync(path.join(repository, "release/evaluation/THIRD-PARTY-NOTICES.txt")));
-  const bundle = assembleBundle({ tgz: packed.tgz, memberLedger: packed.memberLedger, documents, buildCommit: "a".repeat(40), releaseInstant, verificationInstant: releaseInstant, publicKeyPem, privateKeyPem });
+  const bundle = assembleBundle({ tgz: packed.tgz, memberLedger: packed.memberLedger, documents, buildCommit: "a".repeat(40), releaseInstant, verificationInstant: releaseInstant, publicKeyPem, privateKeyPem, releaseKind });
   const archivePath = path.join(root, "delivery.zip"); fs.writeFileSync(archivePath, bundle.zip, { mode: 0o600 });
   const unpacked = path.join(root, "unpacked");
   for (const member of readZip(bundle.zip, releaseInstant)) writeRegular(path.join(unpacked, ...member.path.split("/")), member.bytes, Number.parseInt(member.mode, 8));
@@ -298,4 +301,14 @@ test("acceptance audits, reinstalls offline, exports redacted evidence, and fail
   const packageOverlap = path.join(f.input.installedPackageRoot, "new-state"), packageEvidence = path.join(f.root, "package-overlap-evidence");
   await assert.rejects(runAcceptance({ ...f.input, stateRoot: packageOverlap, evidenceDir: packageEvidence }));
   assert.equal(fs.existsSync(packageOverlap), false); assert.equal(fs.existsSync(packageEvidence), false);
+});
+
+test("commercial candidate acceptance reports its signed preparation identity", async (t) => {
+  const f = fixture(t, "commercial-candidate");
+  const result = await runAcceptance({ ...f.input, stateRoot: path.join(f.root, "candidate-state"), evidenceDir: path.join(f.root, "candidate-evidence") });
+  const evidence = JSON.parse(fs.readFileSync(result.evidencePath, "utf8"));
+  assert.equal(evidence.releaseReceiptSchema, "trajecta.release-integrity-commercial-candidate/v1");
+  assert.equal(evidence.evaluation, "commercial-candidate-activation-pending");
+  assert.equal(evidence.archiveAudit.releaseReceiptSchema, evidence.releaseReceiptSchema);
+  assert.equal(evidence.installedArchiveAudit.releaseReceiptSchema, evidence.releaseReceiptSchema);
 });

@@ -26,6 +26,7 @@ export interface DeliveredBundleAudit {
   memberCount: number;
   installedMemberCount: number;
   releaseInstant: string;
+  releaseReceiptSchema: ReleaseReceipt["schema"];
 }
 
 export interface VerifyBundleInput {
@@ -109,6 +110,12 @@ function verifyArchive(input: VerifyBundleInput): VerifiedArchive {
         || !files.get("LICENSES/CORE-APACHE-2.0.txt")!.equals(coreLicense)
         || !files.get("LICENSES/CORE-NOTICE.txt")!.equals(Buffer.concat([coreNotice, Buffer.from("\n"), modifications]))) {
         releaseError("NOTICE_MISMATCH", "Outer license and notice must preserve the packaged core license and modification notice.");
+      }
+      if (receipt.schema === "trajecta.release-integrity-commercial-candidate/v1") {
+        const innerTerms = audited.members.get("BETA-COMMERCIAL-TERMS.txt");
+        if (!innerTerms || !files.get("LICENSES/BETA-COMMERCIAL-TERMS.txt")!.equals(innerTerms)) {
+          releaseError("TERMS_MISMATCH", "Outer and installed commercial candidate terms must be identical authenticated bytes.");
+        }
       }
       for (const inner of audited.memberLedger) {
         if (inner.originalClass === "apache-core" && inner.path.startsWith("core/src/") && !modifications.toString("utf8").includes(`- ${inner.path}\n`)) {
@@ -232,5 +239,6 @@ export function verifyDeliveredBundle(input: DeliveredBundleInput): DeliveredBun
     memberCount: verified.files.size,
     installedMemberCount: verified.installedLedger.length,
     releaseInstant: verified.receipt.releaseInstant,
+    releaseReceiptSchema: verified.receipt.schema,
   });
 }
