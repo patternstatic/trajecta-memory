@@ -19,7 +19,8 @@ import { errorCode, finalizePacketBudget, validEnvelopeInput } from "./helpers.t
 test("one material envelope byte change fails integrity", () => {
   const envelope = buildLocalResumeEnvelope(validEnvelopeInput());
   const changed = structuredClone(envelope);
-  changed.packet.work.goal = "altered";
+  // Change one byte while preserving the packet's declared byte budget.
+  changed.packet.work.goal = `X${changed.packet.work.goal.slice(1)}`;
   assert.throws(() => assertLocalResumeEnvelope(changed), errorCode("INTEGRITY_MISMATCH"));
 });
 

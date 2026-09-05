@@ -186,9 +186,13 @@ export class TargetRegistry {
     return card;
   }
 
-  lookup(card: LocalWorkspaceTargetCardV1, now = this.clock()): void {
+  lookup(card: LocalWorkspaceTargetCardV1, now = this.clock(), reservation?: { operationId: string; attemptDigest: string }): void {
     this.withLockedRecord(card, undefined, (record) => {
       this.requireFresh(record, now);
+      if (record.state === "reserved" && reservation && record.operationId === reservation.operationId) {
+        if (record.attemptDigest !== reservation.attemptDigest) throw betaError("OPERATION_CONFLICT", "The target reservation is bound to a different attempt.");
+        return;
+      }
       if (record.state !== "issued") throw betaError("TARGET_CONSUMED", "The local target has already been reserved or consumed.");
     });
   }

@@ -138,6 +138,8 @@ export function assertLocalResumeEnvelope(envelope: unknown): asserts envelope i
   timestamp(candidate.createdAt, "Envelope creation timestamp");
   timestamp(candidate.expiresAt, "Envelope expiry timestamp");
   assertTarget(candidate.target);
+  assertPacket(candidate.packet);
+  deriveLocalResumeReceiptReferences(candidate.packet);
 
   const integrity = record(candidate.integrity, "Envelope integrity");
   exactKeys(integrity, "Envelope integrity", ["algorithm", "canonicalPayloadDigest"]);
@@ -147,8 +149,6 @@ export function assertLocalResumeEnvelope(envelope: unknown): asserts envelope i
   const expected = Buffer.from(canonicalSha256(envelopePayload(candidate as LocalResumeEnvelopeV1)), "utf8");
   const actual = Buffer.from(integrity.canonicalPayloadDigest, "utf8");
   if (!timingSafeEqual(actual, expected)) throw betaError("INTEGRITY_MISMATCH", "Envelope canonical payload digest does not match the captured payload.");
-  assertPacket(candidate.packet);
-  deriveLocalResumeReceiptReferences(candidate.packet);
 }
 
 export function assertEnvelopeFresh(envelope: LocalResumeEnvelopeV1, now: Date): void {
