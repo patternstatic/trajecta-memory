@@ -1,7 +1,7 @@
 # Trajecta product site v1
 User request: build the visible product site, after the private SDK delivery.
 
-Direction: paper-white and olive, restrained serif emphasis, existing Trajecta mark.
+Direction: dark charcoal and sage/olive, restrained serif emphasis, existing Trajecta mark. Dark surfaces, readable muted text, and distinct amber rejection / green success states follow Ty's requested dark theme.
 Use the existing competitive-distillation research: demonstrate the stale-handoff failure first, make branch/revision/next action visible, and give one obvious action.
 
 Deliver: responsive product page, three illustrative browser workspaces, handoff approval and exact retry, activity history, downloadable clearly labeled sample receipts, beta guide and approved USD 9 offer. The sandbox is an explanation, not a connection to local SDK or AI accounts. Show the distribution status clearly.
