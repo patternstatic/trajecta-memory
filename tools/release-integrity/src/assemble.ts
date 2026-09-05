@@ -5,6 +5,9 @@ import { buildManifest } from './manifest.ts';
 import { buildEvaluationReceipt, signReceipt, verifySignedReceipt } from './signing.ts';
 import { auditTgz, type TarLedgerMember } from './tar-reader.ts';
 import { releaseError } from './errors.ts';
+import fs from 'node:fs';
+import path from 'node:path';
+import { assertNewOutputDirectory } from './contracts.ts';
 
 export const BUNDLE_ROOT = 'trajecta-verified-resume-sdk-beta-0.1.0';
 export const DOCUMENT_PATHS = ['START-HERE.html','START-HERE.md','recipes/01-planner-to-local-workspace.md','recipes/02-stale-rejection.md','recipes/03-inspect-retry-receipt.md','TROUBLESHOOTING.md','SUPPORTED-ENVIRONMENT.md','LICENSES/CORE-APACHE-2.0.txt','LICENSES/CORE-NOTICE.txt','LICENSES/BETA-COMMERCIAL-TERMS.txt','THIRD-PARTY-NOTICES.txt'] as const;
@@ -71,4 +74,36 @@ export function verifyBundle(input:{zip:Buffer;archiveSha256:string;publicKeyPem
   const sum=files.get('SHA256SUMS.txt')!, covered=new Map(files); covered.delete('SHA256SUMS.txt');
   if(!sum.equals(checksums(covered))) fail();
   return files;
+}
+
+/** No bytes are extracted until the original archive and independent pins pass. */
+export function verifyAndExtractBundle(input: Parameters<typeof verifyBundle>[0] & {outputDirectory:string;sourceRoot:string}): string {
+  const files = verifyBundle(input);
+  const output = assertNewOutputDirectory(input.outputDirectory,input.sourceRoot);
+  const parent = path.dirname(output);
+  if (!fs.lstatSync(parent).isDirectory()) releaseError('UNSAFE_OUTPUT','Extraction requires an existing parent directory.');
+  fs.mkdirSync(output,{mode:0o700});
+  const root = path.join(output,BUNDLE_ROOT);
+  fs.mkdirSync(root,{mode:0o700});
+  for (const [relative,bytes] of files) {
+    const destination = path.join(root,relative);
+    let directory = root;
+    for (const segment of relative.split('/').slice(0,-1)) {
+      directory = path.join(directory,segment);
+      try { fs.mkdirSync(directory,{mode:0o700}); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+      const stat = fs.lstatSync(directory);
+      if (stat.isSymbolicLink() || !stat.isDirectory()) releaseError('UNSAFE_OUTPUT','Extraction paths must remain private regular directories.');
+    }
+    const fd = fs.openSync(destination,fs.constants.O_WRONLY|fs.constants.O_CREAT|fs.constants.O_EXCL|fs.constants.O_NOFOLLOW,0o600);
+    try {
+      fs.writeFileSync(fd,bytes);
+      fs.fsyncSync(fd);
+    } finally { fs.closeSync(fd); }
+    const readFd = fs.openSync(destination,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW);
+    try {
+      if (!fs.fstatSync(readFd).isFile() || !fs.readFileSync(readFd).equals(bytes)) releaseError('MANIFEST_MISMATCH','Extracted bytes do not match the verified archive.');
+    } finally { fs.closeSync(readFd); }
+  }
+  return root;
 }

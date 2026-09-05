@@ -4,6 +4,10 @@ import { generateKeyPairSync } from 'node:crypto';
 import { assembleBundle, verifyBundle, DOCUMENT_PATHS } from '../src/assemble.ts';
 import { createDeterministicTgz } from '../src/deterministic-tgz.ts';
 import { sha256Hex } from '../src/canonical.ts';
+import * as assembly from '../src/assemble.ts';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 test('signed bundle rebuilds identically and verifies independently pinned bytes',()=>{
   const keys=generateKeyPairSync('ed25519'), publicKeyPem=keys.publicKey.export({format:'pem',type:'spki'}).toString(),privateKeyPem=keys.privateKey.export({format:'pem',type:'pkcs8'}).toString();
@@ -24,4 +28,17 @@ test('signed bundle rebuilds identically and verifies independently pinned bytes
   const changed=Buffer.from(first.zip); changed[100]^=1;
   assert.throws(()=>verifyBundle({...pinned,zip:changed,archiveSha256:sha256Hex(changed)}));
   assert.throws(()=>assembleBundle({...input,documents:new Map()}));
+  // A corrupt archive must never leave extracted or executable bytes behind.
+  assert.equal(typeof assembly.verifyAndExtractBundle,'function');
+  const destinationParent=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'trajecta-extraction-test-')));
+  const outputDirectory=path.join(destinationParent,'unpacked');
+  assert.throws(()=>assembly.verifyAndExtractBundle({...pinned,zip:changed,outputDirectory,sourceRoot:process.cwd()}));
+  assert.equal(fs.existsSync(outputDirectory),false);
+  const extracted=assembly.verifyAndExtractBundle({...pinned,outputDirectory,sourceRoot:process.cwd()});
+  assert.equal(fs.readFileSync(path.join(extracted,'START-HERE.md'),'utf8'),'Customer-0 evaluation only');
+  assert.throws(()=>assembly.verifyAndExtractBundle({...pinned,outputDirectory,sourceRoot:process.cwd()}));
+  const linked=path.join(destinationParent,'linked');
+  fs.symlinkSync(destinationParent,linked);
+  assert.throws(()=>assembly.verifyAndExtractBundle({...pinned,outputDirectory:path.join(linked,'escape'),sourceRoot:process.cwd()}));
+  assert.equal(fs.existsSync(path.join(destinationParent,'escape')),false);
 });

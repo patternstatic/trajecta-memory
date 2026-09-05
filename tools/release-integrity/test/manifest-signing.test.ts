@@ -27,7 +27,7 @@ function packagePayload() {
   ];
   return {
     path: "packages/trajecta-beta-0.1.0.tgz",
-    bytes: createDeterministicTgz([{ path: "LICENSES/CORE-MODIFICATIONS.txt", bytes: Buffer.from("notice!"), mode: "0644" as const, originalClass: "notice" as const }, { path: "beta/DEVELOPMENT-BOUNDARY.md", bytes: Buffer.from("boundary"), mode: "0644" as const, originalClass: "documentation" as const }, { path: "beta/src/cli.ts", bytes: Buffer.from("cli"), mode: "0644" as const, originalClass: "commercial-beta" as const }], releaseInstant),
+    bytes: createDeterministicTgz([{ path: "package/LICENSES/CORE-MODIFICATIONS.txt", bytes: Buffer.from("notice!"), mode: "0644" as const }, { path: "package/beta/DEVELOPMENT-BOUNDARY.md", bytes: Buffer.from("boundary"), mode: "0644" as const }, { path: "package/beta/src/cli.ts", bytes: Buffer.from("cli"), mode: "0644" as const }], releaseInstant),
     memberLedger,
   };
 }
