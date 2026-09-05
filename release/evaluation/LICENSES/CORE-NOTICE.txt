@@ -1,0 +1,11 @@
+Trajecta Memory
+Copyright 2026 Tamvi Journal
+
+This product includes software developed through the Ty + Lam research and
+engineering collaboration.
+
+--- Apache-derived modification notice ---
+
+Trajecta Verified Resume SDK Beta — Apache-derived modification notice
+
+No staged Apache-derived members are marked modified by the release license policy.
