@@ -1,5 +1,10 @@
 # Trajecta delivery handoff — approval required
 
+Update: the evaluation-only limitation below has been resolved by a separately
+signed and accepted commercial candidate. The evaluation archive remains
+preserved. Current evidence and remaining activation gates are in
+`2026-09-05-commercial-candidate-acceptance.md`.
+
 ## Ready now
 
 Private GitHub PR 3 merged as `70a1c43d85084dcee996ce48e412a5c135638b6d`.

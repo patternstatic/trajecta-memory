@@ -25,11 +25,11 @@
 
 **Interfaces:** Export `type ReleaseKind = 'evaluation'|'commercial-candidate'`. `BuildReleaseOptions.releaseKind?` is the only optional compatibility field and accepts no other value. `AssemblyInput.releaseKind?` and `StagePackageOptions.releaseKind?` default to evaluation. CLI `build` passes evaluation; `build-commercial-candidate` passes commercial-candidate.
 
-- [ ] Add tests proving the new CLI discriminator, candidate assembly schema, candidate inner terms selection, evaluation default preservation and unknown kind rejection. Run focused tests and observe failure because the profile is not wired.
-- [ ] Add the commercial source root to the frozen allowlist. Add explicit profile source mapping; commercial `START-HERE.md/html` and terms come from commercial sources, while the neutral recipes/troubleshooting/environment file remain named explicit shared sources. Never choose paths from user input.
-- [ ] Pass release kind through both frozen builds, staging and assembly; choose `buildCommercialCandidateReceipt` only for the new kind. Preserve deterministic two-build and offline-install gates.
-- [ ] Add commercial HTML start page matching the existing CSP/offline boundary and new canonical path/fingerprint guidance. Keep evaluation docs unchanged.
-- [ ] Run focused tests GREEN, then `npm run beta:test` and `npm run release:test`; commit scoped files.
+- [x] Add tests proving the new CLI discriminator, candidate assembly schema, candidate inner terms selection, evaluation default preservation and unknown kind rejection. Run focused tests and observe failure because the profile is not wired.
+- [x] Add the commercial source root to the frozen allowlist. Add explicit profile source mapping; commercial `START-HERE.md/html` and terms come from commercial sources, while the neutral recipes/troubleshooting/environment file remain named explicit shared sources. Never choose paths from user input.
+- [x] Pass release kind through both frozen builds, staging and assembly; choose `buildCommercialCandidateReceipt` only for the new kind. Preserve deterministic two-build and offline-install gates.
+- [x] Add commercial HTML start page matching the existing CSP/offline boundary and new canonical path/fingerprint guidance. Keep evaluation docs unchanged.
+- [x] Run focused tests GREEN, then `npm run beta:test` and `npm run release:test`; commit scoped files.
 
 ### Task 2: Bind nested terms and acceptance identity
 
@@ -37,16 +37,16 @@
 
 **Interfaces:** `verifyArchive()` compares outer `LICENSES/BETA-COMMERCIAL-TERMS.txt` to installed `BETA-COMMERCIAL-TERMS.txt` for the commercial-candidate schema. Evaluation verification remains byte-compatible with the preserved evaluation artifact. Acceptance evidence adds `releaseReceiptSchema`; retain `evaluation` with value `not-for-sale` for evaluation and `commercial-candidate-activation-pending` for candidate.
 
-- [ ] Write tampered nested-terms and candidate evidence tests; observe failures because mismatch passes and evidence is hardcoded.
-- [ ] Add byte-equality gate with a bounded `TERMS_MISMATCH` diagnostic and derive evidence identity only from the verified signed receipt schema.
-- [ ] Run focused tests GREEN, beta/release aggregate once, diff check and commit.
+- [x] Write tampered nested-terms and candidate evidence tests; observe failures because mismatch passes and evidence is hardcoded.
+- [x] Add byte-equality gate with a bounded `TERMS_MISMATCH` diagnostic and derive evidence identity only from the verified signed receipt schema.
+- [x] Run focused tests GREEN, beta/release aggregate once, diff check and commit.
 
 ### Task 3: Build and verify exact commercial candidate
 
 **Files:** Evidence documents only after runtime acceptance.
 
-- [ ] Run fresh complete checks on the clean candidate commit.
-- [ ] Build two snapshots with frozen time and the existing external evaluation signing key solely as a technical candidate identity; never claim it is a legal seller identity.
-- [ ] Seller-verify/extract, install with shipped command outside source and run installed acceptance on exact ZIP/pins/key with fresh canonical paths.
-- [ ] Dispatch one fresh-context operator using only delivered bytes, pins/key and `START-HERE.html`; capture all friction honestly.
-- [ ] Review code and evidence; preserve evaluation ZIP. Do not activate checkout or perform a non-revenue order without separate Ty authorization.
+- [x] Run fresh complete checks on the clean candidate commit.
+- [x] Build two snapshots with frozen time and the existing external evaluation signing key solely as a technical candidate identity; never claim it is a legal seller identity.
+- [x] Seller-verify/extract, install with shipped command outside source and run installed acceptance on exact ZIP/pins/key with fresh canonical paths.
+- [x] Dispatch one fresh-context operator using only delivered bytes, pins/key and `START-HERE.html`; capture all friction honestly.
+- [x] Review code and evidence; preserve evaluation ZIP. Do not activate checkout or perform a non-revenue order without separate Ty authorization.
