@@ -1,4 +1,4 @@
-import type { Delta, TransferPacket, WorkItem } from "../../../src/types.ts";
+import type { Delta, TransferPacket, WorkItem } from "./kernel-port.ts";
 
 export interface LocalWorkspaceTargetCardV1 {
   schema: "trajecta.local-target/v1";

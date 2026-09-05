@@ -1,7 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { closeSync, constants, fstatSync, openSync, readSync } from "node:fs";
-import { assertTransferPacket } from "../../../src/adapters/proof/attempt-contract.ts";
-import type { TransferPacket } from "../../../src/types.ts";
+import { assertTransferPacket, type TransferPacket } from "./kernel-port.ts";
 import { canonicalSha256 } from "./canonical.ts";
 import type { LocalResumeEnvelopeV1, LocalWorkspaceTargetCardV1 } from "./contracts.ts";
 import { BetaError, betaError } from "./errors.ts";

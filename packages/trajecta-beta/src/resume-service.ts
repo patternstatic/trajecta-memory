@@ -1,4 +1,4 @@
-import type { WorkItem } from "../../../src/types.ts";
+import type { WorkItem } from "./kernel-port.ts";
 import { canonicalJson } from "./canonical.ts";
 import type { LocalOperationRecordV1, LocalResumeEnvelopeV1, LocalResumeInspectionV1, LocalResumeReceiptV1, ResumeFaultPoint } from "./contracts.ts";
 import { assertEnvelopeFresh, captureLocalResumeEnvelopeFile, deriveLocalResumeReceiptReferences, readLocalResumeEnvelopeBytes } from "./envelope.ts";

@@ -13,3 +13,4 @@ export * from "./kernel-port.ts";
 export * from "./resume-service.ts";
 export * from "./args.ts";
 export * from "./doctor.ts";
+export { runCli, type CliIO } from "./cli.ts";
