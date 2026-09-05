@@ -1,0 +1,48 @@
+Trajecta Verified Resume SDK Beta v0.1 — commercial preparation terms
+
+Release status
+This is a commercial-candidate preparation artifact. Its signature and local
+acceptance results do not activate a sale, establish payment, or identify a
+legal seller. No customer license is issued merely by possession of this
+candidate. The human seller must be identified before paid distribution.
+
+Approved launch offer
+USD 9 one-time for the first ten paying customers; no subscription. Internal
+tests and zero-value orders do not count. No later price increase is automatic.
+
+License on authorized purchase
+The purchaser may use and modify the separately identified commercial beta
+components internally on devices they control. This grant does not permit
+redistribution, resale, public mirroring, sublicensing or service-bureau use of
+those commercial components. No hosted or team service is included.
+
+Open-source boundary
+Apache-covered components retain their Apache License 2.0 rights and notices.
+Nothing here narrows, replaces or restricts those rights, or changes rights
+already granted for previously distributed Apache-covered material. See the
+included CORE-APACHE-2.0.txt and CORE-NOTICE.txt and the component manifest.
+
+Support
+For 30 calendar days after purchase, receive available bug-fix builds for this
+beta version and one email thread for installation clarification at
+lam.thisside@gmail.com. No guaranteed response time, custom integration, setup
+call, feature development or lifetime support is included. The purchased version
+does not expire when the support window ends.
+
+Voluntary refunds
+Request a full refund within seven calendar days of purchase by emailing
+lam.thisside@gmail.com with an order identifier. No troubleshooting prerequisite.
+This voluntary policy does not limit mandatory consumer rights. Financial
+actions are performed only by the authorized human operator.
+
+Supported environment and limits
+Apple Silicon macOS, Node >=22.19 <23, npm and Git. One local workspace and one
+active writer; manually transferred JSON handoffs; English output and guides.
+This is an SDK and command-line workflow, not a hosted service or automatic
+ChatGPT/Codex account connector. A receipt proves a bounded state transition,
+not that an AI completed the intended task. Beta software may contain defects;
+use a disposable workspace and backups before using important work.
+
+Privacy
+No telemetry or hosted storage is included. Do not email target cards, secrets,
+entire repositories or transcripts. Send a redacted error code and failed step.
