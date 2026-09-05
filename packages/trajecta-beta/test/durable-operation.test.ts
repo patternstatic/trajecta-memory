@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { syncBuiltinESMExports } from "node:module";
 import test from "node:test";
-import { BetaError, OperationJournal, ReceiptStore, withWriterLock, type LocalResumeReceiptV1 } from "../src/index.ts";
+import { BetaError, inspectWriterLock, OperationJournal, ReceiptStore, withWriterLock, type LocalResumeReceiptV1 } from "../src/index.ts";
 import { TrajectaStore } from "../../../src/index.ts";
 
 const now = "2026-09-05T00:00:00.000Z";
@@ -29,6 +29,19 @@ function root(t: any) {
 function hash(value: string | Buffer) { return createHash("sha256").update(value).digest("hex"); }
 function file(stateRoot: string, directory: string) { return path.join(stateRoot, directory, `${hash(input.operationId)}.json`); }
 function options(stateRoot: string) { return { stateRoot, operationId: input.operationId, clock: () => new Date(now) }; }
+function treeDigest(root: string): string {
+  if (!fs.existsSync(root)) return "missing";
+  const digest = createHash("sha256");
+  const visit = (current: string, relative: string) => {
+    const entry = fs.lstatSync(current);
+    digest.update(`${relative}\u0000${entry.mode & 0o777}\u0000${entry.size}\u0000`);
+    if (entry.isSymbolicLink()) digest.update(fs.readlinkSync(current));
+    else if (entry.isFile()) digest.update(fs.readFileSync(current));
+    else for (const name of fs.readdirSync(current).sort()) visit(path.join(current, name), path.join(relative, name));
+  };
+  visit(root, ".");
+  return digest.digest("hex");
+}
 function seededOwner(stateRoot: string, change: Record<string, unknown> = {}) {
   fs.mkdirSync(path.join(stateRoot, "locks"), { mode: 0o700 });
   const owner = { schema: "trajecta.writer-lock/v1", operationId: input.operationId, pid: process.pid, hostname: os.hostname(), processStartToken: "old process instance", acquiredAt: now, ...change };
@@ -36,6 +49,62 @@ function seededOwner(stateRoot: string, change: Record<string, unknown> = {}) {
   fs.writeFileSync(path.join(stateRoot, "locks/writer.lock"), bytes, { mode: 0o600 });
   return bytes;
 }
+
+test("read-only writer inspection leaves absent, released, malformed, and busy durable state byte-identical", async (t) => {
+  // Would fail if doctor inspection creates, repairs, appends to, or trusts unsafe writer evidence.
+  const absent = path.join(root(t), "not-created");
+  const absentBefore = treeDigest(absent);
+  assert.deepEqual(inspectWriterLock(absent), { state: "absent" });
+  assert.equal(treeDigest(absent), absentBefore);
+
+  const released = root(t);
+  await withWriterLock(options(released), () => {});
+  const releasedBefore = treeDigest(released);
+  assert.deepEqual(inspectWriterLock(released), { state: "released" });
+  assert.equal(treeDigest(released), releasedBefore);
+
+  const malformed = root(t);
+  fs.mkdirSync(path.join(malformed, "locks"), { recursive: true, mode: 0o700 });
+  fs.chmodSync(malformed, 0o700); fs.chmodSync(path.join(malformed, "locks"), 0o700);
+  fs.writeFileSync(path.join(malformed, "locks/writer.lock"), "{torn", { mode: 0o600 });
+  fs.chmodSync(path.join(malformed, "locks/writer.lock"), 0o600);
+  const malformedBefore = treeDigest(malformed);
+  assert.throws(() => inspectWriterLock(malformed), code("OPERATION_IN_DOUBT"));
+  assert.equal(treeDigest(malformed), malformedBefore);
+
+  const busy = root(t);
+  await withWriterLock(options(busy), () => {
+    const busyBefore = treeDigest(busy);
+    assert.throws(() => inspectWriterLock(busy), code("OPERATION_IN_DOUBT"));
+    assert.equal(treeDigest(busy), busyBefore);
+  });
+});
+
+test("read-only writer inspection rejects unsafe lock paths, modes, and bounds without repairing them", async (t) => {
+  // Would fail if a diagnostic follows a lock alias, trusts insecure evidence, or truncates it to continue.
+  const unsafe = root(t);
+  await withWriterLock(options(unsafe), () => {});
+  const lock = path.join(unsafe, "locks/writer.lock");
+  fs.chmodSync(lock, 0o644);
+  let before = treeDigest(unsafe);
+  assert.throws(() => inspectWriterLock(unsafe), code("OPERATION_IN_DOUBT"));
+  assert.equal(treeDigest(unsafe), before);
+  fs.chmodSync(lock, 0o600);
+  fs.renameSync(lock, `${lock}.saved`);
+  fs.symlinkSync(`${lock}.saved`, lock);
+  before = treeDigest(unsafe);
+  assert.throws(() => inspectWriterLock(unsafe), code("OPERATION_IN_DOUBT"));
+  assert.equal(treeDigest(unsafe), before);
+
+  const oversized = root(t);
+  fs.mkdirSync(path.join(oversized, "locks"), { recursive: true, mode: 0o700 });
+  fs.chmodSync(oversized, 0o700); fs.chmodSync(path.join(oversized, "locks"), 0o700);
+  fs.writeFileSync(path.join(oversized, "locks/writer.lock"), Buffer.alloc(1024 * 1024 + 1), { mode: 0o600 });
+  fs.chmodSync(path.join(oversized, "locks/writer.lock"), 0o600);
+  before = treeDigest(oversized);
+  assert.throws(() => inspectWriterLock(oversized), code("OPERATION_IN_DOUBT"));
+  assert.equal(treeDigest(oversized), before);
+});
 
 test("kernel lock excludes another live writer and keeps one inode after release and callback failure", async (t) => {
   const stateRoot = root(t);

@@ -20,6 +20,7 @@ const held = new WeakMap<object, HeldWriter>();
 
 export interface WriterLockOptions { stateRoot: string; operationId: string; clock?: () => Date }
 function doubt(message: string): never { throw betaError("OPERATION_IN_DOUBT", message); }
+function missing(error: unknown): boolean { return !!error && typeof error === "object" && "code" in error && error.code === "ENOENT"; }
 function bounded(value: unknown, max: number): value is string { return typeof value === "string" && value.trim().length > 0 && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value); }
 function operationId(value: unknown): value is string { return bounded(value, 240) && /^operation:[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value); }
 function validOwner(value: unknown): value is WriterLockV1 {
@@ -114,6 +115,47 @@ function unmatchedOwner(bytes: Buffer): { owner: WriterLockV1; bytes: Buffer } |
     else doubt("Writer epoch history is unverifiable.");
   }
   return current;
+}
+
+/**
+ * Read-only doctor probe for the permanent writer inode. It deliberately never
+ * runs recovery or appends an epoch: any live, unmatched, malformed, or
+ * unbound evidence needs explicit inspection rather than a diagnostic repair.
+ */
+export function inspectWriterLock(stateRoot: string): { state: "absent" | "released" } {
+  if (process.platform !== "darwin") doubt("Writer lock inspection requires supported macOS kernel flags.");
+  const root = path.resolve(stateRoot);
+  try {
+    try { lstatSync(root); } catch (error) {
+      if (missing(error)) return { state: "absent" };
+      throw error;
+    }
+    assertPrivateDirectory(root);
+    const locks = path.join(root, "locks");
+    try { lstatSync(locks); } catch (error) {
+      if (missing(error)) return { state: "absent" };
+      throw error;
+    }
+    assertPrivateDirectory(locks);
+    try { lstatSync(lockFile(root)); } catch (error) {
+      if (missing(error)) return { state: "absent" };
+      throw error;
+    }
+    let descriptor = -1;
+    try {
+      descriptor = openSync(lockFile(root), constants.O_RDONLY | constants.O_NONBLOCK | O_EXLOCK | O_NOFOLLOW_ANY);
+      assertBound(root, descriptor);
+      const bytes = readEpochs(descriptor);
+      if (unmatchedOwner(bytes) !== null) doubt("Persistent writer ownership requires inspection.");
+      assertBound(root, descriptor);
+      return { state: "released" };
+    } finally {
+      if (descriptor >= 0) closeSync(descriptor);
+    }
+  } catch (error) {
+    if (error instanceof BetaError) throw error;
+    doubt("Unable to verify the persistent writer lock without mutation.");
+  }
 }
 
 function append(root: string, fd: number, prior: Buffer, line: Buffer): Buffer {
