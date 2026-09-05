@@ -53,11 +53,20 @@ const WORK_STATUSES = new Set(["active", "waiting", "blocked", "complete", "aban
 const BRANCH_STATUSES = new Set(["exploring", "parked", "merged"]);
 const DELTA_KINDS = new Set(["open", "resume", "instruction", "decision", "progress", "blocker", "correction", "next_action", "branch_open", "branch_park", "synthesis", "handoff", "outcome", "contract_anchor"]);
 
+function compareCodeUnits(left: string, right: string): number {
+  const length = Math.min(left.length, right.length);
+  for (let index = 0; index < length; index++) {
+    const difference = left.charCodeAt(index) - right.charCodeAt(index);
+    if (difference !== 0) return difference;
+  }
+  return left.length - right.length;
+}
+
 function normalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(normalize);
   if (value && typeof value === "object") {
     return Object.fromEntries(Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
+      .sort(([left], [right]) => compareCodeUnits(left, right))
       .map(([key, item]) => [key, normalize(item)]));
   }
   if (value === undefined || typeof value === "function" || typeof value === "symbol") {
@@ -142,7 +151,7 @@ function contractAnchor(value: unknown) {
   timestamp(candidate.createdAt, "Packet contract anchor timestamp");
 }
 
-function transferPacket(packet: unknown) {
+export function assertTransferPacket(packet: unknown): asserts packet is TransferPacket {
   const candidate = packet as Record<string, unknown> | null;
   if (!candidate || candidate.schema !== "trajecta.transfer/v1") throw new Error("Unsupported transfer packet schema");
   opaqueId(candidate.packetId, "Packet ID");
@@ -192,7 +201,7 @@ function transferPacket(packet: unknown) {
 export function assertResumeAttempt(input: ResumeAttemptInputV1) {
   if (input?.schema !== "trajecta.resume-attempt/v1") throw new Error("Unsupported resume attempt schema");
   opaqueId(input.operationId, "Operation ID");
-  transferPacket(input.packet);
+  assertTransferPacket(input.packet);
   bounded(input.target?.name, "Target name", 120);
   opaqueId(input.target?.session, "Target session");
   opaqueId(input.target?.capability, "Target capability");
