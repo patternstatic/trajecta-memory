@@ -4,7 +4,7 @@
 
 **Goal:** Produce a deterministic commercial-candidate ZIP whose signed receipt, outer documents, installed-package terms and acceptance evidence all identify the same preparation-only profile.
 
-**Architecture:** Introduce a closed `ReleaseKind` (`evaluation` or `commercial-candidate`) that defaults to evaluation for the existing API and is explicit in the new CLI command. Route the kind through build, staging and assembly. Keep shared recipes, troubleshooting and environment facts as frozen common evaluation sources where their copy is profile-neutral; use commercial overrides for start pages and terms. Verify nested/outer terms byte equality and surface the signed receipt schema in acceptance evidence.
+**Architecture:** Introduce a closed `ReleaseKind` (`evaluation` or `commercial-candidate`) that defaults to evaluation for the existing API and is explicit in the new CLI command. Route the kind through build, staging and assembly. Keep shared recipes and troubleshooting as frozen common sources where their copy is profile-neutral; use commercial overrides for start pages, environment, package boundary, notices and terms. Verify candidate nested/outer terms byte equality and surface the signed receipt schema in acceptance evidence.
 
 **Tech Stack:** Existing TypeScript, Node 22.23.1, node:test, deterministic ZIP/tgz and Ed25519; no dependencies.
 
@@ -35,7 +35,7 @@
 
 **Files:** Modify `packages/trajecta-beta/src/release/archive-verification.ts`, `packages/trajecta-beta/src/acceptance.ts`; test archive audit and acceptance.
 
-**Interfaces:** `verifyArchive()` compares outer `LICENSES/BETA-COMMERCIAL-TERMS.txt` to installed `BETA-COMMERCIAL-TERMS.txt` for either schema. Acceptance evidence adds `releaseReceiptSchema`; retain `evaluation` with value `not-for-sale` for evaluation and `commercial-candidate-activation-pending` for candidate.
+**Interfaces:** `verifyArchive()` compares outer `LICENSES/BETA-COMMERCIAL-TERMS.txt` to installed `BETA-COMMERCIAL-TERMS.txt` for the commercial-candidate schema. Evaluation verification remains byte-compatible with the preserved evaluation artifact. Acceptance evidence adds `releaseReceiptSchema`; retain `evaluation` with value `not-for-sale` for evaluation and `commercial-candidate-activation-pending` for candidate.
 
 - [ ] Write tampered nested-terms and candidate evidence tests; observe failures because mismatch passes and evidence is hardcoded.
 - [ ] Add byte-equality gate with a bounded `TERMS_MISMATCH` diagnostic and derive evidence identity only from the verified signed receipt schema.

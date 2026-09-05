@@ -29,7 +29,7 @@ function sourceSnapshot(): SourceSnapshot {
     .map((member: string) => `src/${member.slice("package/core/src/".length, -3)}.ts`);
   const files = [...new Set([
     "release/payload-policy.json", "release/trajecta-beta.package.json", "release/license-map.json",
-    "release/evaluation/LICENSES/BETA-COMMERCIAL-TERMS.txt", "release/commercial-candidate/LICENSES/BETA-COMMERCIAL-TERMS.txt", "LICENSE", "NOTICE",
+    "release/evaluation/LICENSES/BETA-COMMERCIAL-TERMS.txt", "release/commercial-candidate/LICENSES/BETA-COMMERCIAL-TERMS.txt", "release/commercial-candidate/DEVELOPMENT-BOUNDARY.md", "LICENSE", "NOTICE",
     "packages/trajecta-beta/DEVELOPMENT-BOUNDARY.md", "packages/trajecta-beta/bin/trajecta-beta",
     "packages/trajecta-beta/src/acceptance.ts", "packages/trajecta-beta/src/acceptance-proof.ts",
     ...stagedBeta, ...stagedCore,
@@ -72,7 +72,7 @@ function fixture(t: test.TestContext, releaseKind: "evaluation" | "commercial-ca
   documents.set("LICENSES/CORE-APACHE-2.0.txt", fs.readFileSync(path.join(repository, "LICENSE")));
   documents.set("LICENSES/CORE-NOTICE.txt", Buffer.concat([fs.readFileSync(path.join(repository, "NOTICE")), Buffer.from("\n"), modificationNotice]));
   documents.set("LICENSES/BETA-COMMERCIAL-TERMS.txt", fs.readFileSync(path.join(repository, releaseKind === "commercial-candidate" ? "release/commercial-candidate/LICENSES/BETA-COMMERCIAL-TERMS.txt" : "release/evaluation/LICENSES/BETA-COMMERCIAL-TERMS.txt")));
-  documents.set("THIRD-PARTY-NOTICES.txt", fs.readFileSync(path.join(repository, "release/evaluation/THIRD-PARTY-NOTICES.txt")));
+  documents.set("THIRD-PARTY-NOTICES.txt", fs.readFileSync(path.join(repository, releaseKind === "commercial-candidate" ? "release/commercial-candidate/THIRD-PARTY-NOTICES.txt" : "release/evaluation/THIRD-PARTY-NOTICES.txt")));
   const bundle = assembleBundle({ tgz: packed.tgz, memberLedger: packed.memberLedger, documents, buildCommit: "a".repeat(40), releaseInstant, verificationInstant: releaseInstant, publicKeyPem, privateKeyPem, releaseKind });
   const archivePath = path.join(root, "delivery.zip"); fs.writeFileSync(archivePath, bundle.zip, { mode: 0o600 });
   const unpacked = path.join(root, "unpacked");

@@ -12,6 +12,7 @@ import {
   parseReleaseInstant,
   parseVerificationInstant,
   parseReleasePins,
+  resolveReleaseKind,
   parseSha256,
 } from "../src/contracts.ts";
 import { canonicalJsonLf, sha256Hex } from "../src/canonical.ts";
@@ -47,6 +48,13 @@ const receipt = {
   keyId: "ed25519:fixture",
   publicKeyFingerprint: "c".repeat(64),
 };
+
+test("release kind defaults only to evaluation and rejects unknown profiles", () => {
+  assert.equal(resolveReleaseKind(undefined), "evaluation");
+  assert.equal(resolveReleaseKind("evaluation"), "evaluation");
+  assert.equal(resolveReleaseKind("commercial-candidate"), "commercial-candidate");
+  assert.throws(() => resolveReleaseKind("commercial" as never), { code: "INVALID_RELEASE_KIND" });
+});
 
 test("canonical bytes are sorted UTF-8 JSON with one LF and stable SHA-256", () => {
   // Would fail if a later receipt or manifest depends on object insertion order or platform line endings.

@@ -11,6 +11,7 @@ import { runControlledOfflineInstall } from "./run.ts";
 import { stagePackage } from "./stage-package.ts";
 
 const DOCUMENT_INPUTS = ["START-HERE.html", "START-HERE.md", "recipes/01-planner-to-local-workspace.md", "recipes/02-stale-rejection.md", "recipes/03-inspect-retry-receipt.md", "TROUBLESHOOTING.md", "SUPPORTED-ENVIRONMENT.md"] as const;
+type ReleaseDocumentName = typeof DOCUMENT_INPUTS[number] | "THIRD-PARTY-NOTICES.txt";
 const BUILDER_NODE_VERSION = "v22.23.1";
 
 export interface BuildReleaseOptions {
@@ -62,20 +63,21 @@ function snapshotBytes(snapshot: SourceSnapshot, relative: string): Buffer {
   return bytes;
 }
 
-function documentSource(releaseKind: ReleaseKind, name: typeof DOCUMENT_INPUTS[number]): string {
+export function releaseDocumentSource(releaseKind: ReleaseKind, name: ReleaseDocumentName): string {
+  if (name === "THIRD-PARTY-NOTICES.txt") return `release/${releaseKind === "commercial-candidate" ? "commercial-candidate" : "evaluation"}/${name}`;
   if (releaseKind === "commercial-candidate" && (name === "START-HERE.html" || name === "START-HERE.md" || name === "SUPPORTED-ENVIRONMENT.md")) return `release/commercial-candidate/payload/${name}`;
   return `release/evaluation/payload/${name}`;
 }
 
 function documents(snapshot: SourceSnapshot, modificationNotice: Buffer, releaseKind: ReleaseKind): ReadonlyMap<string, Buffer> {
   const result = new Map<string, Buffer>();
-  for (const name of DOCUMENT_INPUTS) result.set(name, snapshotBytes(snapshot, documentSource(releaseKind, name)));
+  for (const name of DOCUMENT_INPUTS) result.set(name, snapshotBytes(snapshot, releaseDocumentSource(releaseKind, name)));
   result.set("LICENSES/CORE-APACHE-2.0.txt", snapshotBytes(snapshot, "LICENSE"));
   const notice = snapshotBytes(snapshot, "NOTICE");
   result.set("LICENSES/CORE-NOTICE.txt", Buffer.concat([notice, Buffer.from("\n"), modificationNotice]));
   const terms = releaseKind === "commercial-candidate" ? "release/commercial-candidate/LICENSES/BETA-COMMERCIAL-TERMS.txt" : "release/evaluation/LICENSES/BETA-COMMERCIAL-TERMS.txt";
   result.set("LICENSES/BETA-COMMERCIAL-TERMS.txt", snapshotBytes(snapshot, terms));
-  result.set("THIRD-PARTY-NOTICES.txt", snapshotBytes(snapshot, "release/evaluation/THIRD-PARTY-NOTICES.txt"));
+  result.set("THIRD-PARTY-NOTICES.txt", snapshotBytes(snapshot, releaseDocumentSource(releaseKind, "THIRD-PARTY-NOTICES.txt")));
   return result;
 }
 

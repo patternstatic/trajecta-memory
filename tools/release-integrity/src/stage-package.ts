@@ -357,7 +357,8 @@ export function stagePackage(options: StagePackageOptions): StagedPackage {
   for (const required of SNAPSHOT_REQUIRED) if (!index.entries.has(required)) releaseError("SNAPSHOT_INPUT_MISSING", "Snapshot lacks a required package-staging input.");
   const releaseKind = resolveReleaseKind(options.releaseKind);
   const termsSource = releaseKind === "commercial-candidate" ? "release/commercial-candidate/LICENSES/BETA-COMMERCIAL-TERMS.txt" : "release/evaluation/LICENSES/BETA-COMMERCIAL-TERMS.txt";
-  if (!index.entries.has(termsSource)) releaseError("SNAPSHOT_INPUT_MISSING", "Snapshot lacks the selected release terms.");
+  const boundarySource = releaseKind === "commercial-candidate" ? "release/commercial-candidate/DEVELOPMENT-BOUNDARY.md" : "packages/trajecta-beta/DEVELOPMENT-BOUNDARY.md";
+  if (!index.entries.has(termsSource) || !index.entries.has(boundarySource)) releaseError("SNAPSHOT_INPUT_MISSING", "Snapshot lacks the selected release terms or boundary.");
   const template = readSnapshot(index, "release/trajecta-beta.package.json");
   parsePackageTemplate(template);
   const plannedPaths = parseStagedPolicyPaths(readSnapshot(index, "release/payload-policy.json"));
@@ -369,7 +370,7 @@ export function stagePackage(options: StagePackageOptions): StagedPackage {
     fs.mkdirSync(packageRoot, { recursive: true, mode: 0o755 });
     writeMember(packageRoot, "package.json", template, "0644", licenseMap, members);
     writeMember(packageRoot, "bin/trajecta-beta", Buffer.from("#!/usr/bin/env node\nimport { runCli } from \"../beta/src/cli.js\";\nprocess.exitCode = await runCli(process.argv.slice(2), process.cwd(), { stdout: bytes => { process.stdout.write(bytes); }, stderr: text => { process.stderr.write(text); } });\n", "utf8"), "0755", licenseMap, members);
-    writeMember(packageRoot, "beta/DEVELOPMENT-BOUNDARY.md", readSnapshot(index, "packages/trajecta-beta/DEVELOPMENT-BOUNDARY.md"), "0644", licenseMap, members);
+    writeMember(packageRoot, "beta/DEVELOPMENT-BOUNDARY.md", readSnapshot(index, boundarySource), "0644", licenseMap, members);
     for (const sourcePath of collectBetaSources(index)) {
       const destination = `beta/src/${sourcePath.slice(BETA_SOURCE_PREFIX.length).replace(/\.ts$/, ".js")}`;
       const original = readSnapshot(index, sourcePath);
