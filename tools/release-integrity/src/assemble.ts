@@ -1,5 +1,5 @@
 import { canonicalJsonLf, sha256Hex } from './canonical.ts';
-import { PACKAGE_PATH } from './contracts.ts';
+import { PACKAGE_PATH, parseManifest } from './contracts.ts';
 import { createZip, readZip } from './deterministic-zip.ts';
 import { buildManifest } from './manifest.ts';
 import { buildEvaluationReceipt, signReceipt, verifySignedReceipt } from './signing.ts';
@@ -47,7 +47,10 @@ export function verifyBundle(input:{zip:Buffer;archiveSha256:string;publicKeyPem
   const manifestBytes=files.get('MANIFEST.json')!,receiptBytes=files.get('RELEASE-RECEIPT.json')!;
   const receipt=verifySignedReceipt({receiptBytes,signature:files.get('RELEASE-RECEIPT.json.sig')!,manifestBytes,publicKeyPem:input.publicKeyPem,expectedPublicKeyFingerprint:input.publicKeyFingerprint});
   if(receipt.releaseInstant!==input.releaseInstant || !files.get('SELLER-PUBLIC-KEY.pem')!.equals(Buffer.from(input.publicKeyPem))) fail();
-  const manifest=JSON.parse(manifestBytes.toString('utf8'));
+  let manifest;
+  try { manifest=JSON.parse(manifestBytes.toString('utf8')); }
+  catch { return fail(); }
+  parseManifest(manifest);
   const payloadNames=new Set<string>([...DOCUMENT_PATHS,PACKAGE_PATH]);
   for(const m of manifest.members) {
     if(!payloadNames.delete(m.path)) fail();

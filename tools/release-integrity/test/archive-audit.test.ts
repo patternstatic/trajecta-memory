@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
-import { assembleBundle, DOCUMENT_PATHS } from '../src/assemble.ts';
+import { assembleBundle, verifyBundle, DOCUMENT_PATHS, BUNDLE_ROOT } from '../src/assemble.ts';
 import { createDeterministicTgz } from '../src/deterministic-tgz.ts';
-import { sha256Hex } from '../src/canonical.ts';
+import { canonicalJsonLf, sha256Hex } from '../src/canonical.ts';
+import { createZip, readZip } from '../src/deterministic-zip.ts';
+import { buildEvaluationReceipt, signReceipt } from '../src/signing.ts';
 
 // A signed archive still must preserve the required nested-to-outer notices.
 // Removing the notice comparison must make this test fail.
@@ -25,4 +27,16 @@ test('assembly rejects an outer notice that omits the packaged modification noti
   documents.set('LICENSES/CORE-NOTICE.txt',Buffer.from('Core attribution\n'));
   const input = {tgz:createDeterministicTgz(entries.map(e=>({...e,path:`package/${e.path}`})),releaseInstant),memberLedger,documents,buildCommit:'a'.repeat(40),releaseInstant,verificationInstant:releaseInstant,publicKeyPem,privateKeyPem};
   assert.throws(()=>assembleBundle(input), /notice/i);
+  documents.set('LICENSES/CORE-NOTICE.txt',Buffer.from('Core attribution\n\nModified core/src/index.js\n'));
+  const good = assembleBundle(input);
+  const members = readZip(good.zip,releaseInstant);
+  const manifest = JSON.parse(members.find(m=>m.path.endsWith('/MANIFEST.json'))!.bytes.toString());
+  manifest.unapprovedField = true;
+  const manifestBytes = canonicalJsonLf(manifest);
+  const receipt = buildEvaluationReceipt({buildCommit:input.buildCommit,manifestBytes,releaseInstant,verificationInstant:releaseInstant,publicKeyPem});
+  const altered = members.map(m=>({...m,bytes:m.path.endsWith('/MANIFEST.json') ? manifestBytes : m.path.endsWith('/RELEASE-RECEIPT.json') ? receipt.bytes : m.path.endsWith('/RELEASE-RECEIPT.json.sig') ? signReceipt({receiptBytes:receipt.bytes,privateKeyPem}) : m.bytes}));
+  const sums = Buffer.from(altered.filter(m=>!m.path.endsWith('/SHA256SUMS.txt')).map(m=>`${sha256Hex(m.bytes)}  ${m.path.slice(BUNDLE_ROOT.length+1)}\n`).join(''));
+  altered.find(m=>m.path.endsWith('/SHA256SUMS.txt'))!.bytes = sums;
+  const zip = createZip(altered,releaseInstant);
+  assert.throws(()=>verifyBundle({zip,archiveSha256:sha256Hex(zip),publicKeyPem,publicKeyFingerprint:good.publicKeyFingerprint,releaseInstant}), /unexpected|manifest/i);
 });
