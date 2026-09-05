@@ -15,11 +15,24 @@ function stageDirectory(label: string): string {
   return path.join(os.tmpdir(), `trajecta-${label}-${process.pid}-${Date.now()}-${directorySequence++}`);
 }
 
+function recursiveTypescriptFiles(root: string, relative: string): string[] {
+  const result: string[] = [];
+  const walk = (directory: string): void => {
+    for (const entry of fs.readdirSync(path.join(root, directory), { withFileTypes: true })) {
+      const child = path.posix.join(directory, entry.name);
+      if (entry.isDirectory()) walk(child);
+      else if (entry.isFile() && entry.name.endsWith(".ts")) result.push(child);
+    }
+  };
+  walk(relative);
+  return result.sort();
+}
+
 function snapshotFrom(root = repository): SourceSnapshot {
   const files = [
     "release/payload-policy.json", "release/trajecta-beta.package.json", "release/license-map.json", "release/evaluation/LICENSES/BETA-COMMERCIAL-TERMS.txt", "LICENSE", "NOTICE",
     "packages/trajecta-beta/DEVELOPMENT-BOUNDARY.md", "packages/trajecta-beta/bin/trajecta-beta",
-    ...fs.readdirSync(path.join(root, "packages/trajecta-beta/src")).filter((name) => name.endsWith(".ts")).map((name) => `packages/trajecta-beta/src/${name}`),
+    ...recursiveTypescriptFiles(root, "packages/trajecta-beta/src"),
     "src/index.ts", "src/relay.ts", "src/store.ts", "src/types.ts",
     ...fs.readdirSync(path.join(root, "src/adapters/proof")).filter((name) => name.endsWith(".ts")).map((name) => `src/adapters/proof/${name}`),
   ].sort();
