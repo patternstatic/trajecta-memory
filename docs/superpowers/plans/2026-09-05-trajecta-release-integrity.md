@@ -19,6 +19,11 @@ script, or network dependency is added. All generated Apache runtime members are
 marked modified and retain their modification notices. npm tar members use the
 physical `package/` prefix; manifest ledger paths remain package-relative.
 
+The seller builder is pinned to Node **22.23.1** and npm **10.9.8** because
+build-time type erasure is an experimental Node API. These are frozen toolchain
+inputs recorded in external build evidence; changing them requires a new
+verified release. Customer runtime support remains Node `>=22.19 <23`.
+
 Priority: installed version/doctor/demo must pass before further release polish.
 The later Customer-0 gate remains required and may not be replaced by this smoke
 test. No commercial activation is authorized by this correction.
