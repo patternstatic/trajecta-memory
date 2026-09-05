@@ -83,3 +83,24 @@ pins and evidence were written.
 
 This is a ready-to-try **evaluation**, not completed Customer-0 acceptance and
 not authorized for sale. The original signed limitations remain unchanged.
+
+## Fresh-context operator result
+
+The independent AI operator completed the delivered instructions in 127 seconds,
+using only the evaluation ZIP and independent trust values, without source access.
+Offline install, doctor, host initialization, packet preparation, stale rejection,
+current acceptance, retry and receipt lookup have recorded expected exit codes.
+The final revision was 4; accepted, retry and lookup receipts matched byte for byte.
+This is internal customer-style testing, not human usability or demand evidence.
+
+Evidence: `/private/tmp/trajecta-customer-work.40WlAg/evidence.json`, SHA-256
+`d0ecbc530f26032e8c45beda359367ad86662bb6d4ef78410d3bbc75493f4277`.
+The original report is preserved. Its recipe discrepancy was a misquote: stale
+expected revision 2/current revision 3 agrees with the delivered instructions.
+Correction: `/private/tmp/trajecta-customer-work.40WlAg/correction.json`, SHA-256
+`5f8f634c05ee58716e3b9c2606abd9a60514a6f267c21c28b5087f53f60ad01d`.
+
+The demo printed the expected outcome trace, but its exit code is **unknown**:
+the operator's shell wrapper used a reserved variable after execution. This trial
+also did not separately record signature verification. Neither gap is promoted
+to a pass; the installed acceptance command and final artifact trial remain open.
