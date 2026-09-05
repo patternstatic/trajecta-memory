@@ -96,12 +96,12 @@ export function buildRelease(options: BuildReleaseOptions): BuiltRelease {
     secondSnapshot = preflightSource({ sourceRoot: source, gitBin: options.gitBin, buildCommit: options.buildCommit, policy });
     const second = buildOne(secondSnapshot, options, publicKeyPem, privateKeyPem);
     if (!first.zip.equals(second.zip) || first.archiveSha256 !== second.archiveSha256 || first.publicKeyFingerprint !== second.publicKeyFingerprint) return releaseError("REPRODUCIBILITY_MISMATCH", "Independent frozen builds did not produce identical archives.");
+    const offline = runControlledOfflineInstall({ tgz: first.packed.tgz, memberLedger: first.packed.memberLedger, releaseInstant: options.releaseInstant, npmCli: options.npmCli });
     fs.mkdirSync(output, { mode: 0o700 });
     const archivePath = path.join(output, "trajecta-verified-resume-sdk-beta-0.1.0.zip");
     fs.writeFileSync(archivePath, first.zip, { mode: 0o600, flag: "wx" });
     const finalZip = fs.readFileSync(archivePath);
     verifyBundle({ zip: finalZip, archiveSha256: first.archiveSha256, publicKeyPem, publicKeyFingerprint: first.publicKeyFingerprint, releaseInstant: options.releaseInstant });
-    const offline = runControlledOfflineInstall({ tgz: first.packed.tgz, memberLedger: first.packed.memberLedger, releaseInstant: options.releaseInstant, npmCli: options.npmCli });
     const pins = { schema: "trajecta.release-pins/v1", archiveSha256: first.archiveSha256, keyFingerprint: first.publicKeyFingerprint, archiveAudit: "passed", reproducibility: "passed" };
     parseReleasePins(pins);
     const pinsPath = path.join(output, "release-pins.json");
