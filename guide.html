@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Trajecta — Beta guide</title><link rel="icon" href="assets/mark.svg"><link rel="stylesheet" href="styles.css"></head>
+<body><header class="site-header"><div class="shell nav-wrap"><a class="brand" href="index.html"><img src="assets/mark.svg" alt=""><span>trajecta.</span></a><a class="text-link" href="index.html#workspace">Back to the playground ↗</a></div></header>
+<main class="shell" style="max-width:800px;padding-block:54px 80px">
+<p class="eyebrow">GETTING STARTED / LOCAL SDK BETA</p><h1 style="font-size:44px;line-height:1.15;letter-spacing:-2px;font-weight:500">Your first verified<br><span class="serif">continuation.</span></h1>
+<p class="lede">The playground explains the idea. The downloadable SDK runs it in a local workspace on your Mac.</p>
+<div class="result-message"><div><strong>Beta distribution is being prepared.</strong><p>Checkout is not open yet. These steps describe what to do once you have the beta bundle.</p></div></div>
+<section class="panel-heading" style="margin-top:40px"><h2>01. Check your setup</h2><p>You'll need an Apple Silicon Mac, Node.js 22.19–22.x, npm, and Git. Start with disposable work. The beta supports one local workspace and one writer.</p></section>
+<section class="panel-heading"><h2>02. Verify and install the bundle</h2><p>Open START-HERE.html inside your delivered ZIP. It explains how to compare the ZIP fingerprint and independent public key before installation. Then install the package in a new empty test folder:</p><pre>npm install --prefix . --offline --ignore-scripts \
+  --package-lock=false --no-audit --no-fund \
+  "/absolute/path/to/bundle/packages/trajecta-beta-0.1.0.tgz"
+
+./node_modules/.bin/trajecta-beta version
+./node_modules/.bin/trajecta-beta demo --state-root ./demo-state</pre><p>The demo rejects a stale handoff, accepts the current one, and retries it without advancing twice.</p></section>
+<section class="panel-heading"><h2>03. Verify your installation</h2><p>The delivered guide has the complete verify-acceptance command, with your ZIP, fingerprint and output paths. A successful run prints ACCEPTANCE_PASSED and saves an evidence file you can inspect.</p><p>On macOS, use canonical paths: /private/tmp rather than /tmp. Choose fresh state and evidence directories for each test.</p></section>
+<section class="panel-heading"><h2>04. Continue your own work</h2><p>Use a disposable Git workspace with a commit, an attached branch, and an origin remote. Run doctor, create a target card with host init, then follow the bundle's three recipes for a manually transferred JSON handoff.</p><p>A target card is private and expires after 30 minutes. Keep it out of public posts and support emails.</p></section>
+<section class="panel-heading"><h2>The founding beta</h2><p>USD 9 one-time for the first ten paying customers. You may use and modify the commercial beta components internally on devices you control. Redistribution, resale and hosted/team service are not included; Apache-covered components retain their own rights.</p><p>Includes 30 calendar days of available bug-fix builds and one installation clarification email thread. No guaranteed response time or custom integrations. The purchased version does not expire with the support window.</p><p>Request a full voluntary refund within seven calendar days of purchase with your order identifier; troubleshooting is not a prerequisite. Mandatory consumer rights are unaffected. See the full terms in your bundle.</p></section>
+<section class="result-message"><div><strong>A little help, when you need it.</strong><p>Email <a href="mailto:lam.thisside@gmail.com">lam.thisside@gmail.com</a> with the failed step and a redacted error code. Keep secrets, target cards and entire repositories out of the message.</p></div></section>
+</main></body></html>

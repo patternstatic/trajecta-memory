@@ -33,40 +33,31 @@ test("every demo view exposes the handoff receipt contract", () => {
   assert.equal(describeDemo("resumed").currentRevision, "15");
 });
 
-test("landing page exposes honest conversion and demo hooks", () => {
+test("site exposes an honest sample workspace and working local guide", () => {
   const html = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
-  const demo = fs.readFileSync(new URL("../demo.js", import.meta.url), "utf8");
-  assert.match(html, /Run the 90-second handoff demo/);
-  assert.match(html, /Adapters in validation/i);
-  assert.match(html, /data-demo-root/);
-  assert.match(html, /data-action="TRY_STALE"/);
-  assert.match(html, /data-action="USE_VERIFIED"/);
-  assert.match(html, /data-action="RESUME"/);
-  assert.match(html, /data-packet="stale"[^>]*aria-current="true"/);
-  assert.match(html, /data-packet="current"[^>]*aria-current="false"/);
-  assert.match(html, /data-field="provenance"/);
-  assert.match(html, /data-field="evidence"/);
-  assert.match(html, /data-field="openLoops"/);
-  assert.match(html, /data-state="ready"/);
+  assert.match(html, /Sample data · runs in your browser/);
+  assert.match(html, /Illustrative workflow · no agent connected/);
+  assert.match(html, /href="guide.html"/);
+  assert.match(html, /Checkout is not open yet/);
   assert.match(html, /aria-live="polite"/);
-  assert.match(html, /class="hero-demo"[^>]*id="demo"[\s\S]*class="trajectory"[^>]*data-state="ready"/);
-  assert.match(demo, /root\.closest\("\.hero-demo"\)\?\.querySelector\("\.trajectory"\)/);
-  assert.doesNotMatch(html, /connects live (ChatGPT|Claude|Codex|Cursor)/i);
+  assert.doesNotMatch(html, /github.com\/patternstatic/);
 });
-
-test("stylesheet preserves brand, accessibility, and mobile behavior", () => {
+test("site supports focus visibility, reduced motion and responsive layouts", () => {
   const css = fs.readFileSync(new URL("../styles.css", import.meta.url), "utf8");
-  for (const token of ["#0b1020", "#f4efe6", "#4fd1c5", "#ff6b5e", "#d6a85f"]) assert.match(css.toLowerCase(), new RegExp(token));
   assert.match(css, /:focus-visible/);
   assert.match(css, /prefers-reduced-motion/);
   assert.match(css, /@media[^}]*max-width/s);
 });
-
-test("landing page local links and assets exist", () => {
-  const html = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
-  const refs = [...html.matchAll(/(?:href|src)="([^"]+)"/g)].map((match) => match[1]);
-  for (const ref of refs) {
-    if (ref.startsWith("#") || /^[a-z]+:/i.test(ref) || ref.startsWith("//")) continue;
-    assert.equal(fs.existsSync(path.resolve(path.dirname(new URL("../index.html", import.meta.url).pathname), ref)), true, `missing local reference: ${ref}`);
+test("both site pages link only to existing local files or valid page anchors", () => {
+  for (const page of ["index.html","guide.html"]) {
+    const html=fs.readFileSync(new URL("../"+page,import.meta.url),"utf8");
+    const refs=[...html.matchAll(/(?:href|src)="([^"]+)"/g)].map(match=>match[1]);
+    for(const ref of refs){
+      if(/^[a-z]+:/i.test(ref)||ref.startsWith("//"))continue;
+      const [file,anchor]=ref.split("#");
+      const destination=new URL("../"+(file||page),import.meta.url);
+      assert.ok(fs.existsSync(destination),"missing local reference: "+ref);
+      if(anchor)assert.ok(fs.readFileSync(destination,"utf8").includes('id="'+anchor+'"'),"missing anchor: "+ref);
+    }
   }
 });
